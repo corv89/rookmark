@@ -1,0 +1,15 @@
+.build/
+.swiftpm/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+*.heapsnapshot
+*.network-request
+*.network-response
+
+.DS_Store
