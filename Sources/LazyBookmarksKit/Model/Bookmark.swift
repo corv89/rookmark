@@ -56,8 +56,8 @@ public struct ParseResult: Sendable, Equatable {
 
 /// A flat, single-level set of topic folders. v1 is intentionally flat — no
 /// nested taxonomy — to keep prompts inside the 4 096-token budget.
-public struct Taxonomy: Sendable, Equatable {
-    public struct Folder: Sendable, Equatable {
+public struct Taxonomy: Sendable, Equatable, Codable {
+    public struct Folder: Sendable, Equatable, Codable {
         public var name: String
         public var rationale: String
         public init(name: String, rationale: String) {

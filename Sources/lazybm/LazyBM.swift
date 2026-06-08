@@ -16,6 +16,7 @@ struct LazyBM: AsyncParsableCommand {
             SearchCmd.self,
             Undo.self,
             Status.self,
+            Eval.self,
         ],
         defaultSubcommand: Organize.self
     )

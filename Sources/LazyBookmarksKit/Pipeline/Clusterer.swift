@@ -191,7 +191,8 @@ public struct Clusterer: Sendable {
 
                 do {
                     generated = try await session.respond(
-                        to: prompt, generating: GeneratedFolder.self
+                        to: prompt, generating: GeneratedFolder.self,
+                        options: factory.generationOptions
                     ).content
                 } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
                     sampleSize = max(1, sampleSize / 2)

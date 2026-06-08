@@ -59,7 +59,8 @@ public struct TaxonomyBuilder: Sendable {
             """)
 
             let generated = try await session.respond(
-                to: prompt, generating: GeneratedTaxonomy.self
+                to: prompt, generating: GeneratedTaxonomy.self,
+                options: factory.generationOptions
             ).content
 
             folders = generated.folders.prefix(Self.maxFolders).map {

@@ -51,6 +51,18 @@ struct ClassifierTests {
         #expect(rendered.contains("Unsorted"))
     }
 
+    @Test("renderFolders omits colon when rationale is empty")
+    func renderFoldersEmptyRationale() {
+        let t = Taxonomy(folders: [
+            .init(name: "News", rationale: "Current events"),
+            .init(name: "Tech", rationale: ""),
+        ])
+        let rendered = Classifier.renderFolders(t)
+        #expect(rendered.contains("- News: Current events"))
+        #expect(rendered.contains("- Tech"))
+        #expect(!rendered.contains("- Tech:"))
+    }
+
     @Test("renderPrompt uses local ids and domains")
     func renderPrompt() {
         let bookmarks = [

@@ -80,4 +80,44 @@ struct StoreTests {
         let ok = try store.undoLast(runID: runID)
         #expect(!ok)
     }
+
+    @Test("loadTaxonomy decodes v2 envelope with rationales")
+    func loadTaxonomyV2() throws {
+        let store = try makeStore()
+        let runID = try store.createRun(sourcePath: "test.html")
+        let envelope = TaxonomyEnvelope(v: 2, folders: [
+            .init(name: "News", rationale: "Current events"),
+            .init(name: "Tech", rationale: "Software and hardware"),
+        ])
+        let json = String(data: try JSONEncoder().encode(envelope), encoding: .utf8)!
+        try store.finishRun(runID, taxonomyJSON: json)
+
+        let t = try store.loadTaxonomy(runID: runID)
+        #expect(t != nil)
+        #expect(t!.folders.count == 2)
+        #expect(t!.folders[0].name == "News")
+        #expect(t!.folders[0].rationale == "Current events")
+        #expect(t!.folders[1].name == "Tech")
+    }
+
+    @Test("loadTaxonomy decodes legacy names-only array")
+    func loadTaxonomyLegacy() throws {
+        let store = try makeStore()
+        let runID = try store.createRun(sourcePath: "test.html")
+        let json = String(data: try JSONEncoder().encode(["News", "Tech"]), encoding: .utf8)!
+        try store.finishRun(runID, taxonomyJSON: json)
+
+        let t = try store.loadTaxonomy(runID: runID)
+        #expect(t != nil)
+        #expect(t!.folders.count == 2)
+        #expect(t!.folders[0].name == "News")
+        #expect(t!.folders[0].rationale == "")
+    }
+
+    @Test("loadTaxonomy returns nil for non-existent run")
+    func loadTaxonomyMissing() throws {
+        let store = try makeStore()
+        let t = try store.loadTaxonomy(runID: 9999)
+        #expect(t == nil)
+    }
 }

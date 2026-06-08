@@ -1,5 +1,14 @@
 import Foundation
 
+public struct TaxonomyEnvelope: Codable, Sendable {
+    public var v: Int
+    public var folders: [Taxonomy.Folder]
+    public init(v: Int, folders: [Taxonomy.Folder]) {
+        self.v = v
+        self.folders = folders
+    }
+}
+
 /// Top-level orchestrator wiring the phases together. The CLI's `organize`
 /// command is a thin shell over this.
 public struct Organizer: Sendable {
@@ -13,6 +22,7 @@ public struct Organizer: Sendable {
         public var clustering: ClusteringConfig
         public var constrainedFolderCap: Int
         public var embedderPreference: EmbedderFactory.Preference
+        public var pinnedTaxonomy: Taxonomy?
         public init(
             taxonomyMode: TaxonomyBuilder.Mode = .preserve,
             classifier: Classifier.Config = .init(),
@@ -21,7 +31,8 @@ public struct Organizer: Sendable {
             sourcePath: String? = nil,
             clustering: ClusteringConfig = .init(),
             constrainedFolderCap: Int = 40,
-            embedderPreference: EmbedderFactory.Preference = .sentence
+            embedderPreference: EmbedderFactory.Preference = .sentence,
+            pinnedTaxonomy: Taxonomy? = nil
         ) {
             self.taxonomyMode = taxonomyMode
             self.classifier = classifier
@@ -31,6 +42,7 @@ public struct Organizer: Sendable {
             self.clustering = clustering
             self.constrainedFolderCap = constrainedFolderCap
             self.embedderPreference = embedderPreference
+            self.pinnedTaxonomy = pinnedTaxonomy
         }
     }
 
@@ -65,12 +77,18 @@ public struct Organizer: Sendable {
             throw Error.modelUnavailable("Unknown")
         }
 
-        let parse = NetscapeBookmarkParser().parse(html)
+        var parse = NetscapeBookmarkParser().parse(html)
+        parse.bookmarks.sort { $0.id < $1.id }
         let ctx = factory.contextSize()
         let budget = TokenBudget(total: ctx)
 
-        var taxonomy = try await TaxonomyBuilder(factory: factory, budget: budget)
-            .build(from: parse, mode: options.taxonomyMode, folderLanguage: options.clustering.folderLanguage)
+        var taxonomy: Taxonomy
+        if let pinned = options.pinnedTaxonomy {
+            taxonomy = pinned
+        } else {
+            taxonomy = try await TaxonomyBuilder(factory: factory, budget: budget)
+                .build(from: parse, mode: options.taxonomyMode, folderLanguage: options.clustering.folderLanguage)
+        }
 
         if taxonomy.folders.count > options.constrainedFolderCap {
             taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
@@ -187,7 +205,7 @@ public struct Organizer: Sendable {
 
         if let store, let runID {
             try store.commit(decisions, runID: runID)
-            let taxonomyData = try JSONEncoder().encode(taxonomy.names)
+            let taxonomyData = try JSONEncoder().encode(TaxonomyEnvelope(v: 2, folders: taxonomy.folders))
             let causes = finalCauses
             let summary: [String: Any] = [
                 "unsorted_model_chose": causes.modelChoseUnsorted,

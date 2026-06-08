@@ -19,6 +19,10 @@ public struct SessionFactory: Sendable {
     /// hardcode it at the call site — `contextSize()` is the source of truth.
     public static let fallbackContextSize = 4096
 
+    public var generationOptions: GenerationOptions {
+        GenerationOptions(sampling: .greedy, temperature: 0)
+    }
+
     public init() {}
 
     /// Synchronous availability check suitable for `doctor` / preconditions.

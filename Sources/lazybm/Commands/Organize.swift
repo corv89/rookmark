@@ -46,6 +46,12 @@ struct Organize: AsyncParsableCommand {
     @Option(name: .customLong("folder-language"), help: "BCP-47 language code for generated folder names (e.g. 'en', 'fr'). Default: system preferred language.")
     var folderLanguage: String?
 
+    @Option(name: .customLong("reuse-taxonomy"), help: "Reuse the taxonomy from a previous run (by run ID). Requires --stateful or a .db file next to the input.")
+    var reuseTaxonomy: Int64?
+
+    @Option(name: .customLong("taxonomy-from"), help: "Load taxonomy from a JSON file (format: {\"v\":2,\"folders\":[...]}).")
+    var taxonomyFrom: String?
+
     func run() async throws {
         let factory = SessionFactory()
         guard case .available = factory.availability() else {
@@ -75,13 +81,38 @@ struct Organize: AsyncParsableCommand {
             folderLanguage: folderLanguage
         )
         let html = try String(contentsOfFile: input, encoding: .utf8)
+
+        var pinned: Taxonomy?
+        if let runID = reuseTaxonomy {
+            guard !fresh else {
+                throw ValidationError("--reuse-taxonomy and --fresh are mutually exclusive.")
+            }
+            let dbPath = (input as NSString).deletingPathExtension + ".db"
+            let store = try Store(path: dbPath)
+            guard let t = try store.loadTaxonomy(runID: runID) else {
+                throw ValidationError("No taxonomy found for run #\(runID).")
+            }
+            if t.folders.contains(where: { $0.rationale.isEmpty }) {
+                FileHandle.standardError.write(Data("warning: pinned taxonomy predates rationale storage; classification quality may be lower\n".utf8))
+            }
+            pinned = t
+        } else if let path = taxonomyFrom {
+            guard !fresh else {
+                throw ValidationError("--taxonomy-from and --fresh are mutually exclusive.")
+            }
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            let envelope = try JSONDecoder().decode(TaxonomyEnvelope.self, from: data)
+            pinned = Taxonomy(folders: envelope.folders)
+        }
+
         let organizer = Organizer()
         let opts = Organizer.Options(
             taxonomyMode: fresh ? .fresh : taxMode,
             classifier: .init(initialBatchSize: batchSize, confidenceFloor: confidenceFloor),
             stateful: stateful,
             clustering: clusteringConfig,
-            embedderPreference: embedderPref
+            embedderPreference: embedderPref,
+            pinnedTaxonomy: pinned
         )
 
         final class ProgressState: @unchecked Sendable {

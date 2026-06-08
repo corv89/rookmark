@@ -177,6 +177,23 @@ public struct Store: Sendable {
         }
     }
 
+    public func loadTaxonomy(runID: Int64) throws -> Taxonomy? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT taxonomy_json FROM runs WHERE id = ?
+            """, arguments: [runID]) else { return nil }
+            let json: String? = row["taxonomy_json"]
+            guard let json, let data = json.data(using: .utf8), !data.isEmpty else { return nil }
+            if let envelope = try? JSONDecoder().decode(TaxonomyEnvelope.self, from: data) {
+                return Taxonomy(folders: envelope.folders)
+            }
+            if let names = try? JSONDecoder().decode([String].self, from: data) {
+                return Taxonomy(folders: names.map { Taxonomy.Folder(name: $0, rationale: "") })
+            }
+            return nil
+        }
+    }
+
     // MARK: - Bookmarks
 
     public func upsert(_ bookmarks: [Bookmark], runID: Int64) throws {

@@ -154,7 +154,7 @@ public actor Classifier {
         if let schema {
             let content: GeneratedContent
             do {
-                content = try await session.respond(to: prompt, schema: schema).content
+                content = try await session.respond(to: prompt, schema: schema, options: factory.generationOptions).content
             } catch let e as LanguageModelSession.GenerationError {
                 switch e {
                 case .exceededContextWindowSize:
@@ -209,7 +209,7 @@ public actor Classifier {
     // MARK: - Rendering & validation
 
     static func renderFolders(_ t: Taxonomy) -> String {
-        let lines = t.folders.map { "- \($0.name): \($0.rationale)" }
+        let lines = t.folders.map { "- \($0.name)" + ($0.rationale.isEmpty ? "" : ": \($0.rationale)") }
         return (lines + ["- \(Taxonomy.unsorted): anything that fits nowhere above"]).joined(separator: "\n")
     }
 
