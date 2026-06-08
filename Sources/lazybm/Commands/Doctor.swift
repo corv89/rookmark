@@ -23,7 +23,7 @@ struct Doctor: AsyncParsableCommand {
         }
 
         // Report embedder status
-        if let embedder = EmbedderFactory.makeBest() {
+        if let embedder = EmbedderFactory.make() {
             let family = embedder.modelID.hasPrefix("contextual") ? "contextual" : "sentence"
             print("\nEmbedding:")
             print("  Backend:  \(family)")

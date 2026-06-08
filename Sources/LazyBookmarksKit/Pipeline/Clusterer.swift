@@ -55,11 +55,12 @@ public struct Clusterer: Sendable {
         self.embedder = embedder
     }
 
-    public func embed(_ bookmarks: [Bookmark]) -> [String: [Float]] {
+    public func embed(_ bookmarks: [Bookmark], cache: [String: [Float]] = [:]) -> [String: [Float]] {
+        var result = cache
+        let uncachedBookmarks = bookmarks.filter { !result.keys.contains($0.id) }
+
         if let embedder {
-            var result: [String: [Float]] = [:]
-            result.reserveCapacity(bookmarks.count)
-            for b in bookmarks {
+            for b in uncachedBookmarks {
                 let text = ContextualEmbedder.normalizeForEmbedding(
                     "\(b.title.isEmpty ? "(untitled)" : b.title) \(b.domain)"
                 )
@@ -71,11 +72,9 @@ public struct Clusterer: Sendable {
         }
 
         guard let embedding = NLEmbedding.sentenceEmbedding(for: .english) else {
-            return Self.fallbackEmbed(bookmarks)
+            return Self.fallbackEmbed(uncachedBookmarks, into: &result)
         }
-        var result: [String: [Float]] = [:]
-        result.reserveCapacity(bookmarks.count)
-        for b in bookmarks {
+        for b in uncachedBookmarks {
             let text = "\(b.title.isEmpty ? "(untitled)" : b.title) \(b.domain)"
             if let vec = embedding.vector(for: text) {
                 result[b.id] = vec.map { Float($0) }
@@ -84,10 +83,9 @@ public struct Clusterer: Sendable {
         return result
     }
 
-    static func fallbackEmbed(_ bookmarks: [Bookmark]) -> [String: [Float]] {
-        guard let wordEmb = NLEmbedding.wordEmbedding(for: .english) else { return [:] }
+    static func fallbackEmbed(_ bookmarks: [Bookmark], into result: inout [String: [Float]]) -> [String: [Float]] {
+        guard let wordEmb = NLEmbedding.wordEmbedding(for: .english) else { return result }
         let dim = wordEmb.dimension
-        var result: [String: [Float]] = [:]
         for b in bookmarks {
             let words = "\(b.title) \(b.domain)".lowercased().split(separator: " ").map(String.init)
             var avg = Array(repeating: Float(0), count: dim)

@@ -139,7 +139,8 @@ struct ClustererTests {
             Bookmark(id: "a", title: "Swift", url: "https://swift.org"),
             Bookmark(id: "b", title: "Rust", url: "https://rust-lang.org"),
         ]
-        let result = Clusterer.fallbackEmbed(bookmarks)
+        var result: [String: [Float]] = [:]
+        let _ = Clusterer.fallbackEmbed(bookmarks, into: &result)
         if !result.isEmpty {
             let dimA = result["a"]?.count ?? 0
             let dimB = result["b"]?.count ?? 0

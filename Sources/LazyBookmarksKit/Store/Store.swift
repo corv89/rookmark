@@ -113,6 +113,27 @@ public struct Store: Sendable {
         }
     }
 
+    public func loadEmbeddings(bookmarkIDs: Set<String>, model: String) throws -> [String: [Float]] {
+        guard !bookmarkIDs.isEmpty else { return [:] }
+        return try dbQueue.read { db in
+            let placeholders = bookmarkIDs.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT bookmark_id, vector FROM embeddings
+                WHERE model = ? AND bookmark_id IN (\(placeholders))
+            """
+            var args: [DatabaseValueConvertible] = [model as DatabaseValueConvertible]
+            args.append(contentsOf: bookmarkIDs.map { $0 as DatabaseValueConvertible })
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+            var result: [String: [Float]] = [:]
+            for row in rows {
+                let id: String = row["bookmark_id"]
+                let data: Data = row["vector"]
+                result[id] = Clusterer.blobToVector(data)
+            }
+            return result
+        }
+    }
+
     // MARK: - Clusters
 
     public func saveClusters(_ clusters: [(label: String, rationale: String, memberIDs: [String], accepted: Bool)], runID: Int64) throws {

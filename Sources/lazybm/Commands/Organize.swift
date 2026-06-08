@@ -34,8 +34,8 @@ struct Organize: AsyncParsableCommand {
     @Option(help: "Taxonomy mode: 'preserve', 'fresh', or 'cluster'.")
     var taxonomy: String = "preserve"
 
-    @Option(name: .customLong("embedder"), help: "Embedding backend: 'auto', 'contextual' (multilingual, transformer), or 'sentence' (legacy English).")
-    var embedder: String = "auto"
+    @Option(name: .customLong("embedder"), help: "Embedding backend: 'sentence' (default, fast) or 'contextual' (multilingual, transformer; requires 'lazybm doctor --download-assets').")
+    var embedder: String = "sentence"
 
     @Option(name: .customLong("cluster-threshold"), help: "Cosine similarity threshold (0-1) for grouping bookmarks into clusters. Use -1 for auto (per-embedder defaults).")
     var clusterThreshold: Double = -1
@@ -64,8 +64,7 @@ struct Organize: AsyncParsableCommand {
         let embedderPref: EmbedderFactory.Preference = {
             switch embedder {
             case "contextual": return .contextual
-            case "sentence": return .sentence
-            default: return .auto
+            default: return .sentence
             }
         }()
         let clusteringConfig = ClusteringConfig(
@@ -98,8 +97,13 @@ struct Organize: AsyncParsableCommand {
             }
         }
         let state = ProgressState()
-        let result = try await organizer.organize(html: html, options: opts) { done, total in
-            state.update("Classifying \(done)/\(total)…")
+        let result: Organizer.Result
+        do {
+            result = try await organizer.organize(html: html, options: opts) { done, total in
+                state.update("Classifying \(done)/\(total)…")
+            }
+        } catch Organizer.Error.contextualEmbedderUnavailable {
+            throw ValidationError("Contextual embedder not available. Run: lazybm doctor --download-assets")
         }
 
         let out = output ?? (input as NSString).deletingPathExtension + ".organized.html"

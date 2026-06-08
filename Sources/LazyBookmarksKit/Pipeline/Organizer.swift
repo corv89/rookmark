@@ -21,7 +21,7 @@ public struct Organizer: Sendable {
             sourcePath: String? = nil,
             clustering: ClusteringConfig = .init(),
             constrainedFolderCap: Int = 40,
-            embedderPreference: EmbedderFactory.Preference = .auto
+            embedderPreference: EmbedderFactory.Preference = .sentence
         ) {
             self.taxonomyMode = taxonomyMode
             self.classifier = classifier
@@ -50,6 +50,7 @@ public struct Organizer: Sendable {
     /// `Store` for per-batch commit + resume (see ImplementationPlan.md).
     public enum Error: Swift.Error, Sendable {
         case modelUnavailable(String)
+        case contextualEmbedderUnavailable
     }
 
     public func organize(
@@ -90,14 +91,17 @@ public struct Organizer: Sendable {
 
         let classifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
         var decisions = await classifier.classify(parse.bookmarks, taxonomy: taxonomy, progress: progress)
-        var reClassifierCauses: Classifier.UnsortedCauses?
+
 
         if options.clustering.enabled {
             let residueIDs = Set(decisions.filter { $0.folder == Taxonomy.unsorted }.map(\.bookmarkID))
             let residue = parse.bookmarks.filter { residueIDs.contains($0.id) }
 
             if residue.count >= options.clustering.minResidue {
-                let embedder = await EmbedderFactory.makeBestAsync(preferred: options.embedderPreference)
+                let embedder = await EmbedderFactory.makeAsync(preferred: options.embedderPreference)
+                if options.embedderPreference == .contextual && embedder == nil {
+                    throw Error.contextualEmbedderUnavailable
+                }
                 // Apply per-embedder-family default thresholds when not explicitly overridden.
                 var clusteringCfg = options.clustering
                 if clusteringCfg.similarityThreshold < 0 {
@@ -109,7 +113,23 @@ public struct Organizer: Sendable {
                     clusteringCfg.mergeThreshold = t.merge
                 }
                 let clusterer = Clusterer(factory: factory, budget: budget, config: clusteringCfg, embedder: embedder)
-                let vectors = clusterer.embed(residue)
+
+                let embeddingCache: [String: [Float]]
+                if let store, let embedder {
+                    let residueIDSet = Set(residue.map(\.id))
+                    embeddingCache = (try? store.loadEmbeddings(bookmarkIDs: residueIDSet, model: embedder.modelID)) ?? [:]
+                } else {
+                    embeddingCache = [:]
+                }
+
+                let vectors = clusterer.embed(residue, cache: embeddingCache)
+
+                if let store, let runID, let embedder {
+                    let newVectors = vectors.filter { !embeddingCache.keys.contains($0.key) }
+                    if !newVectors.isEmpty {
+                        try? store.cacheEmbeddings(newVectors, runID: runID, model: embedder.modelID)
+                    }
+                }
                 let clusters = clusterer.cluster(vectors)
 
                 if !clusters.isEmpty {
@@ -125,7 +145,6 @@ public struct Organizer: Sendable {
 
                         let reClassifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
                         let residueDecisions = await reClassifier.classify(residue, taxonomy: taxonomy)
-                        reClassifierCauses = await reClassifier.unsortedCauses
 
                         let residueDecisionMap = Dictionary(uniqueKeysWithValues: residueDecisions.map { ($0.bookmarkID, $0) })
                         for i in decisions.indices {
@@ -147,16 +166,24 @@ public struct Organizer: Sendable {
             }
         }
 
-        // Compute final Unsorted breakdown from the post-reclassification decisions.
-        let classifierCauses = await classifier.unsortedCauses
-        var finalCauses = classifierCauses
-        if let reClassifierCauses = reClassifierCauses {
-            finalCauses = Classifier.UnsortedCauses(
-                modelChoseUnsorted: classifierCauses.modelChoseUnsorted + reClassifierCauses.modelChoseUnsorted,
-                belowFloor: classifierCauses.belowFloor + reClassifierCauses.belowFloor,
-                unmapped: classifierCauses.unmapped + reClassifierCauses.unmapped
-            )
+        // Recompute final Unsorted breakdown from the post-reclassification decisions.
+        // We walk the final decisions array (which may have Phase 2 replacements)
+        // rather than summing classifier accumulators, which double-counts when
+        // Phase 2 rescues bookmarks that Phase 1 put in Unsorted.
+        var finalCauses = Classifier.UnsortedCauses()
+        let allBookmarkIDs = Set(parse.bookmarks.map(\.id))
+        let decidedIDs = Set(decisions.map(\.bookmarkID))
+        let floor = options.classifier.confidenceFloor
+        for d in decisions {
+            if d.folder == Taxonomy.unsorted {
+                if d.confidence >= floor {
+                    finalCauses.modelChoseUnsorted += 1
+                } else {
+                    finalCauses.belowFloor += 1
+                }
+            }
         }
+        finalCauses.unmapped = allBookmarkIDs.subtracting(decidedIDs).count
 
         if let store, let runID {
             try store.commit(decisions, runID: runID)
