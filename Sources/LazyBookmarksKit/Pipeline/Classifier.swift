@@ -34,6 +34,14 @@ public actor Classifier {
         public var bookmarkID: String
         public var folder: String
         public var confidence: Int
+        public var modelChosenFolder: String?
+
+        public init(bookmarkID: String, folder: String, confidence: Int, modelChosenFolder: String? = nil) {
+            self.bookmarkID = bookmarkID
+            self.folder = folder
+            self.confidence = confidence
+            self.modelChosenFolder = modelChosenFolder
+        }
     }
 
     /// Reports per-batch progress (committed count, total). Hook the CLI bar here.
@@ -193,7 +201,7 @@ public actor Classifier {
                 out.append(Decision(bookmarkID: b.id, folder: Taxonomy.unsorted, confidence: conf))
             } else if conf < config.confidenceFloor {
                 unsortedCauses.belowFloor += 1
-                out.append(Decision(bookmarkID: b.id, folder: Taxonomy.unsorted, confidence: conf))
+                out.append(Decision(bookmarkID: b.id, folder: Taxonomy.unsorted, confidence: conf, modelChosenFolder: folder))
             } else {
                 out.append(Decision(bookmarkID: b.id, folder: folder, confidence: conf))
             }

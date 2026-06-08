@@ -87,7 +87,7 @@ struct Organize: AsyncParsableCommand {
             guard !fresh else {
                 throw ValidationError("--reuse-taxonomy and --fresh are mutually exclusive.")
             }
-            let dbPath = (input as NSString).deletingPathExtension + ".db"
+            let dbPath = input + ".db"
             let store = try Store(path: dbPath)
             guard let t = try store.loadTaxonomy(runID: runID) else {
                 throw ValidationError("No taxonomy found for run #\(runID).")
@@ -110,6 +110,7 @@ struct Organize: AsyncParsableCommand {
             taxonomyMode: fresh ? .fresh : taxMode,
             classifier: .init(initialBatchSize: batchSize, confidenceFloor: confidenceFloor),
             stateful: stateful,
+            sourcePath: input,
             clustering: clusteringConfig,
             embedderPreference: embedderPref,
             pinnedTaxonomy: pinned

@@ -8,6 +8,14 @@ DerivedData/
 *.sqlite-shm
 *.sqlite-wal
 
+*.db
+*.db-shm
+*.db-wal
+*.organized.html
+worksheet.csv
+sample.stderr
+*.labels.db
+
 *.heapsnapshot
 *.network-request
 *.network-response

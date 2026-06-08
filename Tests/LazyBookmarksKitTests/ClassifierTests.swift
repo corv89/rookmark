@@ -83,4 +83,18 @@ struct ClassifierTests {
         let prompt = Classifier.renderPrompt(bookmarks, folderBlock: folderBlock)
         #expect(prompt.contains("(untitled)"))
     }
+
+    @Test("Decision.modelChosenFolder is nil by default")
+    func decisionModelChosenFolderDefault() {
+        let d = Classifier.Decision(bookmarkID: "a", folder: "News", confidence: 80)
+        #expect(d.modelChosenFolder == nil)
+    }
+
+    @Test("Decision.modelChosenFolder preserves pre-demotion folder")
+    func decisionModelChosenFolderBelowFloor() {
+        let d = Classifier.Decision(bookmarkID: "a", folder: Taxonomy.unsorted, confidence: 8, modelChosenFolder: "Cooking")
+        #expect(d.folder == Taxonomy.unsorted)
+        #expect(d.modelChosenFolder == "Cooking")
+        #expect(d.confidence == 8)
+    }
 }
