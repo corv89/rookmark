@@ -1,0 +1,61 @@
+{
+  "v": 2,
+  "folders": [
+    {
+      "name": "Software",
+      "rationale": "Programming languages (Python, Nim, C, JavaScript runtimes like Bun/Deno), frameworks (Django, HTMX, NiceGUI), editors/IDEs (Helix, vi), dev tools (Litestream, dotfiles), distributed systems protocols, coding education, software engineering blog posts, web applications (collaborative tools, project management, accounting software), and browser extensions. Route here instead of Design & UX when the resource is a functional application or tool, not a visual design resource. Route here instead of Hardware & Infrastructure when the resource is about code, not physical devices. Route here instead of AI & ML when it's traditional software engineering, not machine learning. Route here instead of Linux & Systems when it's application code, not OS-level tooling."
+    },
+    {
+      "name": "AI & ML",
+      "rationale": "Machine learning models, LLMs, generative AI (Civitai, Rosebud), local inference (running models on laptops), AI benchmarks (LocalScore), AI tooling (Context7, Agent Skills), speech recognition, and AI research. Route here instead of Software when the resource is specifically about ML/AI models or training. Route here instead of Culture & Media when discussing applied AI systems, not theoretical questions about consciousness or ethics."
+    },
+    {
+      "name": "Hardware & Infrastructure",
+      "rationale": "Server hardware (Supermicro, IPMI), networking equipment (routers, OpenWrt), embedded systems (ESP32, Raspberry Pi), smart home devices (Home Assistant, SONOFF, smart relays), PCB prototyping (PCBWay, Eurocircuits), electronic components (relays, fuse taps), security hardware (Betrusted), GPS trackers (Teltonika, SinoTrack), IP cameras (Hikvision, OpenIPC), cloud platforms (Fly.io, Cloudflare), DNS/certificates (Let's Encrypt, DNS4EU), and European cloud alternatives. Route here instead of Software when the resource is about physical devices or infrastructure, not code. Route here instead of Maker & Fabrication when it's finished hardware products, not DIY fabrication. Route here instead of EV & Transportation when it's general electronics, not vehicle-specific."
+    },
+    {
+      "name": "Linux & Systems",
+      "rationale": "Linux distributions (Fedora, openSUSE, Serpent OS, Talos), container orchestration (Kubernetes, k3s), image-mode deployments (bootc, OSTree, Docker optimization), boot systems (ZFSBootMenu), macOS-specific tools (OrbStack, Lingon, dock settings), and OS-level infrastructure. Route here instead of Software when the resource is about operating systems, containers, or system configuration, not application development. Route here instead of Hardware & Infrastructure when it's software configuration, not physical devices."
+    },
+    {
+      "name": "Crypto & Finance",
+      "rationale": "Bitcoin protocol and ecosystem (Lightning Network, Ordinals, Casey Rodarmor), self-custody and node hardware (Umbrel), Bitcoin scaling (OP_NET), trading and derivatives (Hyperliquid), prediction markets (Polymarket), Bitcoin price analysis, Bitcoin developer education (Optech, stacker news), startup resources (Startup Starter Pack, JoinSecret), business operations (logistics, research papers on markets). Route here instead of Software when the resource is about financial systems or business, not code. Route here instead of Hardware & Infrastructure when discussing crypto node hardware specifically, not general servers."
+    },
+    {
+      "name": "EV & Transportation",
+      "rationale": "Electric vehicles: e-bikes, e-scooters, e-motorcycles (Sur-Ron, NIU, HORWIN, LYVA, Harmony), EV manufacturers and dealers, EV charging infrastructure (Swap & Go), EV batteries and components, EV industry associations and databases, related renewable energy (solar), and transportation statistics. Route here instead of Hardware & Infrastructure when the resource is specifically about electric vehicles or vehicle components. Route here instead of Travel & Living when discussing local transport infrastructure, not destinations or expat life."
+    },
+    {
+      "name": "Maker & Fabrication",
+      "rationale": "3D printing models and STL files (Prusa Mini parts, cases, adapters from Printables, MakerWorld), filaments (Spectrum PET-G HT100), 3D printing services, printer upgrades (Bondtech extruders), CNC tools (CNC Kitchen), hardware prototyping tools (Pixel Pump), and maker retail. Route here instead of Hardware & Infrastructure when the resource is about DIY fabrication tools and projects, not finished commercial devices. Route here instead of EV & Transportation when it's general maker projects, not vehicle-specific."
+    },
+    {
+      "name": "Design & UX",
+      "rationale": "Visual design resources ONLY: icon sets (Simple Icons, React Icons), font collections (Nerd Fonts), CSS libraries (matcha.css, Tailwind), design tools (Figma, draw.io), and visual art or design inspiration. Do NOT include general web applications, software tools, or functional applications - those belong in Software. Do NOT include media players or content platforms - those belong in Culture & Media. Route here ONLY for typography, color palettes, icon libraries, CSS frameworks, and visual design inspiration."
+    },
+    {
+      "name": "Travel & Living",
+      "rationale": "Travel planning and destination resources: review platforms (TripAdvisor), event ticketing (SeatPick), nomad and expat guides (NomadX, Portugalist, Cost of Living Index), photo trip albums, general travel logistics, real estate (buying, selling, renting property), and food/cooking/recipes. Route here instead of EV & Transportation when discussing destinations or lifestyle, not vehicle infrastructure. Route here instead of Crypto & Finance when it's personal lifestyle, not business or investment."
+    },
+    {
+      "name": "Culture & Media",
+      "rationale": "Philosophy and deep intellectual inquiry (Stoicism, Joscha Bach, cypherpunk ideology), history and cultural archives (Gilded Age privacy, Barlaam and Josaphat), music history and genre guides (Ishkur's Guide), music archives (Free Music Archive), video and media consumption platforms (live sports streaming, tv.garden, Piped, 123Movies, torrents), and news outlets (BBC, TNW). Route here instead of Software when the resource is about content consumption or humanities, not code creation. Route here instead of AI & ML when discussing theoretical questions about consciousness or ethics, not applied AI systems."
+    },
+    {
+      "name": "Marketing & Growth",
+      "rationale": "Digital marketing and growth: SEO tools (Telescope), marketing agencies (Fresh Digital), marketing talent platforms (Mayple), social media outreach automation (DMpro), and developer-focused content marketing (Algora TV). Route here instead of Crypto & Finance when the resource is about promotional strategy, not business operations or finance. Route here instead of Design & UX when it's marketing strategy and tools, not visual design resources."
+    },
+    {
+      "name": "Health & Wellness",
+      "rationale": "Personal health and wellness: psychotherapy (Acceptance and Commitment Therapy), air quality monitoring (AQI data), and pharmaceutical/manufacturing quality standards (GMP, ALCOA++). Route here instead of Hardware & Infrastructure when discussing human health or environmental health data, not devices. Route here instead of EV & Transportation when it's about human wellness, not vehicle safety."
+    },
+    {
+      "name": "Legal & Policy",
+      "rationale": "Legal resources and contracts: terms-of-service analysis (ToS;DR), contract templates (Common Paper), legal documents, legal tech, and consumer rights resources. Route here instead of Crypto & Finance when the resource is about regulatory or legal frameworks, not commercial operations."
+    },
+    {
+      "name": "Search & Reference",
+      "rationale": "Search engines (Google, Bing, Yahoo, Marginalia), general reference (Wikipedia), and lookup tools. Use only for search engine home pages and index services, not for articles or content found via search. Route here instead of Culture & Media when the resource is a lookup tool, not content to consume."
+    }
+  ]
+}
