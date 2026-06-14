@@ -79,7 +79,8 @@ public struct LabelStore: Sendable {
     }
 
     public func importCSV(_ data: Data) throws -> Int {
-        guard let csv = String(data: data, encoding: .utf8) else { return 0 }
+        guard var csv = String(data: data, encoding: .utf8) else { return 0 }
+        csv = csv.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         let lines = Self.parseCSVLines(csv)
         guard lines.count > 1 else { return 0 }
 
@@ -136,20 +137,19 @@ public struct LabelStore: Sendable {
                     currentField.append(ch)
                 }
             } else {
-                switch ch {
-                case "\"":
+                if ch == "\"" {
                     inQuotes = true
-                case ",":
+                } else if ch == "," {
                     currentLine.append(currentField)
                     currentField = ""
-                case "\n", "\r":
+                } else if ch == "\n" {
                     if !currentField.isEmpty || !currentLine.isEmpty {
                         currentLine.append(currentField)
                         result.append(currentLine)
                         currentLine = []
                         currentField = ""
                     }
-                default:
+                } else {
                     currentField.append(ch)
                 }
             }
