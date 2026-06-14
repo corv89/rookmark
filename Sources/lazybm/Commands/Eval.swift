@@ -55,6 +55,19 @@ enum EvalCLI {
             throw ValidationError("Model unavailable.")
         }
     }
+
+    final class ProgressState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lastLine = ""
+        func update(_ line: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            if line != lastLine {
+                FileHandle.standardError.write(Data((line + "\r").utf8))
+                lastLine = line
+            }
+        }
+    }
 }
 
 // MARK: - eval run (variance harness)
@@ -114,7 +127,11 @@ struct EvalRun: AsyncParsableCommand {
                 clustering: clusteringConfig,
                 embedderPreference: embedderPref
             )
-            let result = try await organizer.organize(html: html, options: opts)
+            let state = EvalCLI.ProgressState()
+            let result = try await organizer.organize(html: html, options: opts) { done, total in
+                state.update("Classifying \(done)/\(total)…")
+            }
+            FileHandle.standardError.write(Data("\n".utf8))
             let total = result.bookmarks.count
             let placed = result.bookmarks.filter { ($0.assignedFolder ?? Taxonomy.unsorted) != Taxonomy.unsorted }.count
             let causes = result.unsortedCauses
@@ -231,7 +248,11 @@ struct EvalSample: AsyncParsableCommand {
         )
 
         FileHandle.standardError.write(Data("Running pipeline...\n".utf8))
-        let result = try await organizer.organize(html: html, options: opts)
+        let state = EvalCLI.ProgressState()
+        let result = try await organizer.organize(html: html, options: opts) { done, total in
+            state.update("Classifying \(done)/\(total)…")
+        }
+        FileHandle.standardError.write(Data("\n".utf8))
 
         let decisions: [Classifier.Decision] = result.bookmarks.map { b in
             Classifier.Decision(
@@ -350,7 +371,11 @@ struct EvalMetrics: AsyncParsableCommand {
         )
 
         FileHandle.standardError.write(Data("Running pipeline...\n".utf8))
-        let result = try await organizer.organize(html: html, options: opts)
+        let state = EvalCLI.ProgressState()
+        let result = try await organizer.organize(html: html, options: opts) { done, total in
+            state.update("Classifying \(done)/\(total)…")
+        }
+        FileHandle.standardError.write(Data("\n".utf8))
 
         let decisions: [Classifier.Decision] = result.bookmarks.map { b in
             Classifier.Decision(
@@ -443,8 +468,13 @@ struct EvalCalib: AsyncParsableCommand {
         )
 
         FileHandle.standardError.write(Data("Running pipeline (floor=\(confidenceFloor))...\n".utf8))
-        let result = try await organizer.organize(html: html, options: opts)
+        let state = EvalCLI.ProgressState()
+        let result = try await organizer.organize(html: html, options: opts) { done, total in
+            state.update("Classifying \(done)/\(total)…")
+        }
+        FileHandle.standardError.write(Data("\n".utf8))
 
+        FileHandle.standardError.write(Data("Mapping bookmarks to decisions...\n".utf8))
         let decisions: [Classifier.Decision] = result.bookmarks.map { b in
             Classifier.Decision(
                 bookmarkID: b.id,
@@ -453,28 +483,34 @@ struct EvalCalib: AsyncParsableCommand {
             )
         }
 
+        FileHandle.standardError.write(Data("Running calibration analysis...\n".utf8))
         let bins = FloorAnalysis.calibrate(decisions: decisions, labels: labels)
+        FileHandle.standardError.write(Data("Running floor sweep...\n".utf8))
         let sweep = FloorAnalysis.floorSweep(decisions: decisions, labels: labels)
 
         let labeledCount = labels.count
-        print("Calibration on \(input) (\(result.bookmarks.count) bookmarks, \(labeledCount) labels)")
-        print("")
-        print("Confidence bins:")
-        print(String(format: "%-10s%-10s%-10s%-10s", "Bin", "Placed", "Accepted", "Precision"))
-        print(String(repeating: "\u{2500}", count: 40))
+        let stdout = FileHandle.standardOutput
+        stdout.write(Data("Calibration on \(input) (\(result.bookmarks.count) bookmarks, \(labeledCount) labels)\n".utf8))
+        stdout.write(Data("\n".utf8))
+        stdout.write(Data("Confidence bins:\n".utf8))
+        let binHeader = "Bin        Placed    Accepted  Precision\n"
+        stdout.write(Data(binHeader.utf8))
+        stdout.write(Data((String(repeating: "\u{2500}", count: 40) + "\n").utf8))
         for b in bins {
-            print(String(format: "%-10s%-10d%-10d%-10.1f",
-                         "\(b.floor)-\(b.ceiling)", b.placed, b.accepted, b.precision * 100))
+            let line = "\(b.floor)-\(b.ceiling)  \(b.placed)  \(b.accepted)  \(String(format: "%.1f", b.precision * 100))\n"
+            stdout.write(Data(line.utf8))
         }
 
-        print("")
-        print("Floor sweep (simulated):")
-        print(String(format: "%-10s%-10s%-12s%-12s", "Floor", "Yield", "Precision", "Coverage"))
-        print(String(repeating: "\u{2500}", count: 44))
+        stdout.write(Data("\n".utf8))
+        stdout.write(Data("Floor sweep (simulated):\n".utf8))
+        let sweepHeader = "Floor     Yield     Precision   Coverage\n"
+        stdout.write(Data(sweepHeader.utf8))
+        stdout.write(Data((String(repeating: "\u{2500}", count: 44) + "\n").utf8))
         for p in sweep {
-            print(String(format: "%-10d%-10.1f%-12.1f%-12.1f",
-                         p.floor, p.yield * 100, p.precision * 100, p.coverage * 100))
+            let line = "\(p.floor)  \(String(format: "%.1f", p.yield * 100))  \(String(format: "%.1f", p.precision * 100))  \(String(format: "%.1f", p.coverage * 100))\n"
+            stdout.write(Data(line.utf8))
         }
+        try? stdout.synchronize()
     }
 }
 
@@ -887,7 +923,11 @@ struct EvalJudge: AsyncParsableCommand {
 
         let organizer = Organizer()
         FileHandle.standardError.write(Data("Running pipeline...\n".utf8))
-        let result = try await organizer.organize(html: html, options: opts)
+        let state = EvalCLI.ProgressState()
+        let result = try await organizer.organize(html: html, options: opts) { done, total in
+            state.update("Classifying \(done)/\(total)…")
+        }
+        FileHandle.standardError.write(Data("\n".utf8))
 
         let decisions = result.bookmarks.map { b in
             Classifier.Decision(
