@@ -21,3 +21,7 @@ sample.stderr
 *.network-response
 
 .DS_Store
+test_small.html
+test_small.organized.html
+labels-to-import.csv
+labels-unix.csv

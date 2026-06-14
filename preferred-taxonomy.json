@@ -2,104 +2,104 @@
   "v": 2,
   "folders": [
     {
-      "name": "3D Printing",
-      "rationale": ""
-    },
-    {
-      "name": "AI",
-      "rationale": ""
-    },
-    {
-      "name": "Bitcoin",
-      "rationale": ""
-    },
-    {
-      "name": "Business",
-      "rationale": ""
-    },
-    {
-      "name": "Design",
-      "rationale": ""
-    },
-    {
-      "name": "EV",
-      "rationale": ""
-    },
-    {
-      "name": "Electronics",
-      "rationale": ""
-    },
-    {
-      "name": "Health",
-      "rationale": ""
-    },
-    {
-      "name": "History",
-      "rationale": ""
-    },
-    {
-      "name": "IoT",
-      "rationale": ""
-    },
-    {
-      "name": "Javascript",
-      "rationale": ""
-    },
-    {
-      "name": "Legal",
-      "rationale": ""
+      "name": "Programming",
+      "rationale": "General-purpose software development: programming languages (Python, Nim, C), editors and IDEs (Helix, vi), web frameworks (Django, HTMX, NiceGUI), distributed systems protocols (Kademlia, petnames), developer tools (Litestream, Stacked PRs, dotfiles management), coding education and blog posts about software craft. Use for software that is not specific to JavaScript runtimes, not an OS distribution, and not hardware/embedded."
     },
     {
       "name": "Linux",
-      "rationale": ""
+      "rationale": "Linux distributions (Fedora, openSUSE, Serpent OS, Talos), container and image-mode deployments (bootc, OSTree, Docker optimization), boot systems (ZFSBootMenu), orchestration (Kubernetes, k3s), and Linux-specific server tools. Use for OS-level infrastructure, not for macOS or general programming."
     },
     {
       "name": "Mac",
-      "rationale": ""
+      "rationale": "macOS-specific software, Apple ecosystem tools, Apple hardware/software company pages, and macOS configuration tips (dock settings, TFTP, background items). Use only when the resource is clearly macOS/Apple-specific."
     },
     {
-      "name": "Marketing",
-      "rationale": ""
+      "name": "Javascript",
+      "rationale": "JavaScript and TypeScript runtimes (Bun, Deno, Node.js), JS-specific libraries and frameworks (Helia for IPFS, PeerJS for WebRTC), and JS ecosystem tools. Use for resources centered on the JavaScript runtime or JS-specific package ecosystem, not general web development (which goes to Programming)."
     },
     {
-      "name": "Misc",
-      "rationale": ""
+      "name": "AI",
+      "rationale": "Artificial intelligence and machine learning: foundation models, LLMs, generative AI (Civitai, Rosebud), local inference (running models on laptops), AI benchmarks (LocalScore), AI tooling (Context7, Agent Skills), and speech recognition models. Use for ML/AI research, tools, and applications."
     },
     {
-      "name": "Multimedia",
-      "rationale": ""
+      "name": "EV",
+      "rationale": "Electric vehicles: e-bikes, e-scooters, e-motorcycles (Sur-Ron, NIU, HORWIN, LYVA, Harmony), EV manufacturers and dealers, EV charging infrastructure (Swap & Go), EV batteries and components, EV industry associations and databases, and related renewable energy (solar). Covers both consumer and industry resources."
     },
     {
-      "name": "News",
-      "rationale": ""
+      "name": "IoT",
+      "rationale": "Internet of Things and smart home: Home Assistant integrations, ESPHome, SONOFF devices, smart relays (SmartWise, eWeLink), GPS and OBD vehicle trackers (Teltonika, SinoTrack), IP cameras (OpenIPC, MDVRs, Hikvision), industrial IoT protocols (ISO 15118), and data sovereignty in connected devices."
     },
     {
-      "name": "Philosophy",
-      "rationale": ""
+      "name": "Electronics",
+      "rationale": "Electronic components and fabrication: PCB prototyping (PCBWay, Eurocircuits), relays and wiring harnesses, fuse taps, EMS/contract manufacturing (Bluechips), hardware prototyping tools (Pixel Pump), and security hardware (Betrusted). Use for physical electronic components and manufacturing, not for finished consumer devices."
     },
     {
-      "name": "Programming",
-      "rationale": ""
+      "name": "3D Printing",
+      "rationale": "3D printing models and STL files (Prusa Mini parts, cases, adapters from Printables, MakerWorld), filaments (Spectrum PET-G HT100), 3D printing services, printer upgrades (Bondtech extruders), and related CNC/3D-print retail (CNC Kitchen). Use for additive manufacturing resources."
     },
     {
-      "name": "Real Estate",
-      "rationale": ""
-    },
-    {
-      "name": "Search",
-      "rationale": ""
+      "name": "Bitcoin",
+      "rationale": "Bitcoin protocol and ecosystem: Lightning Network, Ordinals (Casey Rodarmor), self-custody and node hardware (Umbrel), Bitcoin scaling (OP_NET, Scaling Bitcoin workshops), trading and derivatives (Hyperliquid), prediction markets (Polymarket), Bitcoin price analysis (Rainbow chart), and Bitcoin developer education (Optech, stacker news)."
     },
     {
       "name": "Technology",
-      "rationale": ""
-    },
-    {
-      "name": "Travel",
-      "rationale": ""
+      "rationale": "Broad technology topics that do not fit a more specific category: server hardware (Supermicro, IPMI configuration), networking infrastructure (OpenWrt, routers), cloud platforms (Fly.io, Cloudflare), European cloud alternatives, security camera tools, game streaming (Moonlight), web3/blockchain infrastructure (Fleek), data tools (VisiData), tech news aggregators (Tech Posts Europe, HN discussions), email services (Purelymail), and maker/electronics retail. This is the catch-all for tech resources."
     },
     {
       "name": "Web",
-      "rationale": ""
+      "rationale": "Web infrastructure and DNS: certificate authorities (Let's Encrypt), encrypted DNS (DNS-over-HTTPS profiles, DNS4EU), dynamic DNS (DynIP), and web protocol improvements. Use for the plumbing of the web, not for web applications or frameworks (which go to Programming or Javascript)."
+    },
+    {
+      "name": "Design",
+      "rationale": "Visual design and UI resources: icon sets (Simple Icons, React Icons), font collections (Nerd Fonts), CSS libraries (matcha.css), design tools (Figma), and visual art or design inspiration (Hiroshi Nagai). Use for graphic design, typography, and UI component libraries."
+    },
+    {
+      "name": "Travel",
+      "rationale": "Travel planning and destination resources: review platforms (TripAdvisor), event ticketing (SeatPick), nomad and expat guides (NomadX, Portugalist, Cost of Living Index), photo trip albums, and general travel logistics. Use for resources about traveling to or living in specific places."
+    },
+    {
+      "name": "Philosophy",
+      "rationale": "Philosophy and deep intellectual inquiry: Stoicism (Marcus Aurelius), consciousness and AI philosophy (Joscha Bach, Self Models), cypherpunk and privacy ideology (A Cypherpunk's Manifesto), philosophy history and visualizations, and CCC/chaos talks on foundational questions. Use for abstract, ethical, or metaphysical inquiry."
+    },
+    {
+      "name": "History",
+      "rationale": "Historical topics and cultural archives: social history (Gilded Age privacy), religious/literary history (Barlaam and Josaphat), music history and genre guides (Ishkur's Guide), and music archives (Free Music Archive). Use for resources about the past, cultural heritage, and archival collections."
+    },
+    {
+      "name": "Multimedia",
+      "rationale": "Video and media consumption platforms: live sports streaming (Buffstreams, SportHub), live TV (tv.garden), video frontends (Piped), movie streaming sites (123Movies), and torrent platforms (1337x). Use for media playback, streaming, and download platforms."
+    },
+    {
+      "name": "Business",
+      "rationale": "Entrepreneurship and business operations: startup launch resources (Startup Starter Pack), deal platforms for founders (Secret/JoinSecret), logistics companies, and business research (prediction market academic papers). Use for starting and running a business, not for marketing or marketing tools."
+    },
+    {
+      "name": "Marketing",
+      "rationale": "Digital marketing and growth: SEO tools (Telescope), marketing agencies (Fresh Digital), marketing talent platforms (Mayple), social media outreach automation (DMpro), and developer-focused content marketing (Algora TV). Use for marketing strategy, tools, and services."
+    },
+    {
+      "name": "Search",
+      "rationale": "Search engines: Google, Bing, Yahoo, and independent/privacy-focused alternatives (Marginalia). Use only for search engine home pages and index services."
+    },
+    {
+      "name": "Health",
+      "rationale": "Health and wellness: air quality monitoring (AQI data), psychotherapy (Acceptance and Commitment Therapy), and pharmaceutical/manufacturing quality (GMP, ALCOA++). Use for personal health, environmental health data, and medical/regulatory quality standards."
+    },
+    {
+      "name": "Legal",
+      "rationale": "Legal resources and contracts: terms-of-service analysis (ToS;DR) and contract templates (Common Paper). Use for legal documents, legal tech, and consumer rights resources."
+    },
+    {
+      "name": "News",
+      "rationale": "General news outlets: BBC News, The Next Web (TNW), and similar news organizations. Use only for news organization home pages and news feeds, not for tech blogs or individual articles."
+    },
+    {
+      "name": "Real Estate",
+      "rationale": "Real estate listings, agencies, and property markets. Use for buying, selling, or renting property."
+    },
+    {
+      "name": "Misc",
+      "rationale": "Truly miscellaneous resources that do not fit any other category: browser-specific pages (Orion User Guide, Orion Feedback), local device admin interfaces (printer UI), communication tools (Google Hangouts), general reference (Wikipedia), and niche or uncategorizable sites. Use as a last resort when no other folder applies."
     }
   ]
 }

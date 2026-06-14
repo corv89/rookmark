@@ -68,8 +68,7 @@ public actor Classifier {
         self.config = config
         self.budget = budget
         if let t = taxonomy {
-            let built = try? ConstrainedClassificationSchema.make(allowedFolders: t.allowedFolderNames)
-            self.schema = built
+            self.schema = try? ConstrainedClassificationSchema.make(allowedFolders: t.allowedFolderNames)
         } else {
             self.schema = nil
         }

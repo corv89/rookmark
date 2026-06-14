@@ -50,7 +50,7 @@ public enum ConstrainedClassificationSchema {
                       schema: DynamicGenerationSchema(arrayOf: assignment))
             ])
 
-        return try GenerationSchema(root: root, dependencies: [assignment])
+        return try GenerationSchema(root: root, dependencies: [])
     }
 
     public enum SchemaError: Error, Sendable {
