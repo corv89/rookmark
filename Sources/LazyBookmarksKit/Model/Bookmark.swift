@@ -33,8 +33,8 @@ public struct Bookmark: Sendable, Identifiable, Equatable, Codable {
         self.confidence = confidence
     }
 
-    /// Registrable domain (host minus leading `www.`), used in prompts instead
-    /// of the full URL to save precious context tokens.
+    /// Registrable domain (host minus leading `www.`). Previously used in prompts
+    /// to save context tokens, but full URLs are now preferred for better classification.
     public var domain: String {
         guard let host = URL(string: url)?.host() else { return "" }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host

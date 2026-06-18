@@ -76,8 +76,11 @@ public actor Classifier {
 
     private static let instructions = """
     You sort web bookmarks into folders. You are given a list of allowed folders \
-    (name: description) and a list of items, each as `id | title | domain`. \
+    (name: description) and a list of items, each as `id | title | url`. \
     For every item, choose the single best-fitting folder from the allowed list. \
+    Focus on what the page is actually about based on its title and URL path, \
+    not just the domain name. For example, a Wikipedia article about electric \
+    vehicles belongs in the EV folder, not Search & Reference. \
     If none fits well, choose "Unsorted". Return exactly one assignment per item \
     and echo each id exactly. Do not invent folders.
     """
@@ -108,7 +111,7 @@ public actor Classifier {
                 index = end
                 progress?(decisions.count, bookmarks.count)
                 // Recover toward the configured size after a successful batch.
-                batchSize = min(config.initialBatchSize, max(batchSize, slice.count))
+                batchSize = min(config.initialBatchSize, batchSize + 1)
             } catch let err as ClassifierError {
                 switch err {
                 case .contextOverflow where batchSize > config.minBatchSize:
@@ -222,7 +225,7 @@ public actor Classifier {
 
     static func renderPrompt(_ slice: [Bookmark], folderBlock: String) -> String {
         let items = slice.enumerated().map { i, b in
-            "b\(i) | \(b.title.isEmpty ? "(untitled)" : b.title) | \(b.domain)"
+            "b\(i) | \(b.title.isEmpty ? "(untitled)" : b.title) | \(b.url)"
         }.joined(separator: "\n")
         return """
         Allowed folders:

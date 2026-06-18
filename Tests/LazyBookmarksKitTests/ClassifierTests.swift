@@ -63,7 +63,7 @@ struct ClassifierTests {
         #expect(!rendered.contains("- Tech:"))
     }
 
-    @Test("renderPrompt uses local ids and domains")
+    @Test("renderPrompt uses local ids and full URLs")
     func renderPrompt() {
         let bookmarks = [
             Bookmark(id: "abc", title: "Swift Lang", url: "https://swift.org/docs"),
@@ -71,9 +71,8 @@ struct ClassifierTests {
         ]
         let folderBlock = Classifier.renderFolders(Self.taxonomy)
         let prompt = Classifier.renderPrompt(bookmarks, folderBlock: folderBlock)
-        #expect(prompt.contains("b0 | Swift Lang | swift.org"))
-        #expect(prompt.contains("b1 | BBC News | bbc.co.uk"))
-        #expect(!prompt.contains("https://swift.org/docs"))
+        #expect(prompt.contains("b0 | Swift Lang | https://swift.org/docs"))
+        #expect(prompt.contains("b1 | BBC News | https://bbc.co.uk/news"))
     }
 
     @Test("renderPrompt shows (untitled) for empty titles")

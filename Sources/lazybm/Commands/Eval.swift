@@ -270,7 +270,9 @@ struct EvalSample: AsyncParsableCommand {
         )
 
         FileHandle.standardError.write(Data("Sampled \(rows.count) bookmarks for labeling.\n".utf8))
-        print(Sampler.toCSV(rows))
+        let csv = Sampler.toCSV(rows)
+        FileHandle.standardOutput.write(Data(csv.utf8))
+        try? FileHandle.standardOutput.synchronize()
     }
 }
 
