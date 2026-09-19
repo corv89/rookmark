@@ -32,3 +32,7 @@ DerivedData/
 /tuning/*.csv
 /tuning/*.numbers
 /tuning/run-data/
+
+# UI reference screenshots of other apps. Kept locally: ~18MB of binaries
+# that would live in history forever, and they aren't ours to redistribute.
+/design/
