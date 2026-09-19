@@ -5,6 +5,15 @@ import SwiftUI
 struct RookmarkApp: App {
     @State private var model = OrganizerModel()
 
+    init() {
+        // Before any window or state exists, so a duplicate launch cannot read
+        // the session and start racing the instance that already owns it.
+        if !SingleInstanceGuard.claim() {
+            MainActor.assumeIsolated { SingleInstanceGuard.activateRunningInstance() }
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         WindowGroup("Rookmark") {
             ContentView(model: model)

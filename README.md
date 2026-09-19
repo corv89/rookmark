@@ -4,17 +4,17 @@ Sorts a pile of browser bookmarks into sensible topic folders, using the
 on-device language model built into macOS. Nothing is uploaded, nothing is
 deleted, and no account is required.
 
-Rooks cache things and remember where they put them. That is the whole idea.
+_Rooks cache things and remember where they put them, that's why!_
 
-## The problem
+## Problem & Solution
 
-Bookmark collections rot. You save things for years, folders stop matching what
-you actually save, and a browser migration can drop the folder structure
-entirely. The profile this was built against had 1,687 bookmarks of which 1,685
-had no valid folder at all: an import had carried the bookmarks across but left
-every parent-folder reference dangling.
+If you're anything like me, you keep finding interesting content around the web
+but never take the time to organize it properly. Or, a botched browser migration 
+wipes what you've painstakingly organized by hand.
 
-Rookmark reads that pile and proposes a home for each item.
+Rookmark sorts your pile of bookmarks automatically and proposes a new home for
+each one, without exposing any of your content.
+
 
 ## Requirements
 
@@ -22,12 +22,12 @@ Rookmark reads that pile and proposes a home for each item.
 - Xcode 26+ toolchain to build
 
 The classifier is Apple's `FoundationModels` system model, which exists only on
-this configuration. There is deliberately no Linux or Intel target.
+this configuration. There is no Linux or Intel target currently, sorry!
 
 ## Install
 
 ```
-git clone https://github.com/<you>/rookmark
+git clone https://github.com/corv89/rookmark
 cd rookmark
 swift build -c release
 ```
@@ -121,22 +121,17 @@ runbook. The `eval` subcommand reproduces all of it.
 ## What it will not do
 
 - **It never modifies your browser.** Output is always a new file that you
-  choose to import. There is no write-back path.
+  choose to import manually, once you're satisfied with the proposed structure.
 - **It never sends your bookmarks anywhere.** Classification and embedding both
-  run on-device. Optional page-description fetching is the only feature that
-  touches the network, and it is off by default in the app.
+  run on-device. Optional page-description fetching and liveness checks are the only feature that
+  touch the network, and they're off by default.
 
 ## Known limitations
 
-- A run in progress cannot be stopped safely yet. Cancellation is swallowed by
-  the classifier's error handling and would silently file the remainder under
-  `Unsorted`, so no cancel button is offered until that is fixed.
-- A full run commits only at the end, so interrupting one loses the
-  classification work (fetched page descriptions and embeddings do survive).
 - Safari's bookmarks are unreadable without Full Disk Access; export from Safari
   and open the file instead. Chrome and Firefox importers are not written yet.
-- The taxonomy is flat. Nested folders are not generated.
+- The taxonomy is flat. We don't generate nested folders.
 
 ## License
 
-MIT
+GNU General Public License v3.0. See [LICENSE](LICENSE).
