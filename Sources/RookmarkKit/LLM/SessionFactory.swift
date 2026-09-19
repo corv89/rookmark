@@ -2,7 +2,7 @@ import Foundation
 import FoundationModels
 
 /// Wraps `SystemLanguageModel` lifecycle concerns: availability gating, the
-/// 4 096-token context-size probe, and prewarmed session creation.
+/// context-size probe, and prewarmed session creation.
 ///
 /// NOTE on concurrency: the on-device model is a single shared system resource.
 /// The framework effectively serializes inference, so spinning up many parallel
@@ -15,8 +15,10 @@ public struct SessionFactory: Sendable {
         case unavailable(reason: String)
     }
 
-    /// 4 096 today and "no possibility of it changing" per Apple, but we never
-    /// hardcode it at the call site — `contextSize()` is the source of truth.
+    /// Last-resort floor only. The window is NOT a constant: 4 096 was the
+    /// documented figure, but macOS 27 reports 8 192. Always read `contextSize()`
+    /// rather than assuming either — code that hardcodes one will either waste
+    /// most of a larger window or overflow a smaller one.
     public static let fallbackContextSize = 4096
 
     public var generationOptions: GenerationOptions {

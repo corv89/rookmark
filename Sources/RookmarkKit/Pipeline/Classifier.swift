@@ -4,7 +4,7 @@ import FoundationModels
 /// Phase 3 of the pipeline: assign each bookmark to a taxonomy folder using the
 /// on-device model, one short batch at a time.
 ///
-/// Design rules driven by the 4 096-token window and the shared model resource:
+/// Design rules driven by the (OS-dependent) context window and the shared model resource:
 ///  • A fresh `LanguageModelSession` per batch — never accumulate transcript.
 ///  • Short, token-budgeted batches; shrink-and-retry on context overflow.
 ///  • Refusals are an expected per-item outcome → isolate, then route to Unsorted.
@@ -12,13 +12,18 @@ import FoundationModels
 public actor Classifier {
 
     public struct Config: Sendable {
+        /// `0` derives the starting size from the live context window instead of
+        /// fixing it. The taxonomy block is re-sent with every batch, so how many
+        /// items fit depends on both the window and the taxonomy — and the window
+        /// is not a constant across OS versions (4 096 on some, 8 192 on others).
+        /// Set a positive value to pin it, which is what the eval sweeps do.
         public var initialBatchSize: Int
         public var minBatchSize: Int
         public var confidenceFloor: Int
         public var maxConcurrency: Int
 
         public init(
-            initialBatchSize: Int = 6,
+            initialBatchSize: Int = 0,
             minBatchSize: Int = 1,
             confidenceFloor: Int = 15,
             maxConcurrency: Int = 1
@@ -46,6 +51,18 @@ public actor Classifier {
 
     /// Reports per-batch progress (committed count, total). Hook the CLI bar here.
     public typealias ProgressHandler = @Sendable (_ done: Int, _ total: Int) -> Void
+
+    /// Delivers each batch's decisions as soon as it lands, so a UI can fill in
+    /// while the run continues rather than waiting minutes for the whole array.
+    /// Note these are not final: Phase 2 clustering may later re-place anything
+    /// that came back `Unsorted`, so consumers must key by `bookmarkID` and
+    /// update in place.
+    public typealias BatchHandler = @Sendable (_ decisions: [Decision]) -> Void
+
+    /// Ceiling for the derived batch size. Bigger batches amortize the taxonomy
+    /// block better, but every item's answer has to fit the output reserve too,
+    /// and large batches make the model likelier to skip items.
+    static let autoBatchCap = 12
 
     /// Counts of why bookmarks ended up in Unsorted.
     public struct UnsortedCauses: Sendable, Equatable {
@@ -90,21 +107,38 @@ public actor Classifier {
 
     /// Classifies all bookmarks against `taxonomy`. Pure: returns decisions; the
     /// caller persists/commits (enables resume + undo).
+    /// Throws `CancellationError` if the surrounding task is cancelled. Decisions
+    /// already delivered through `onBatch` remain valid — the caller keeps them.
     public func classify(
         _ bookmarks: [Bookmark],
         taxonomy: Taxonomy,
         enrichments: [String: ContentEnricher.EnrichResult]? = nil,
-        progress: ProgressHandler? = nil
-    ) async -> [Decision] {
+        progress: ProgressHandler? = nil,
+        onBatch: BatchHandler? = nil
+    ) async throws -> [Decision] {
         let allowed = Set(taxonomy.allowedFolderNames.map(Self.canonical))
         let folderBlock = Self.renderFolders(taxonomy)
 
         var decisions: [Decision] = []
         decisions.reserveCapacity(bookmarks.count)
         var index = 0
-        var batchSize = config.initialBatchSize
+        let ceiling = derivedInitialBatchSize(bookmarks, folderBlock: folderBlock, enrichments: enrichments)
+        var batchSize = ceiling
+
+        /// Records a finished slice and publishes it before the next model call.
+        func commit(_ batch: [Decision], through end: Int) {
+            decisions.append(contentsOf: batch)
+            index = end
+            onBatch?(batch)
+            progress?(decisions.count, bookmarks.count)
+        }
 
         while index < bookmarks.count {
+            // Cancellation must be observed here rather than left to the catch-all
+            // below, which would otherwise file the remaining items under Unsorted
+            // and report a successful run.
+            try Task.checkCancellation()
+
             let end = min(index + batchSize, bookmarks.count)
             let slice = Array(bookmarks[index..<end])
 
@@ -112,11 +146,11 @@ public actor Classifier {
                 let batch = try await classifyBatch(slice, folderBlock: folderBlock,
                                                      allowed: allowed, taxonomy: taxonomy,
                                                      enrichments: enrichments)
-                decisions.append(contentsOf: batch)
-                index = end
-                progress?(decisions.count, bookmarks.count)
-                // Recover toward the configured size after a successful batch.
-                batchSize = min(config.initialBatchSize, batchSize + 1)
+                commit(batch, through: end)
+                // Recover toward the ceiling after a successful batch.
+                batchSize = min(ceiling, batchSize + 1)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let err as ClassifierError {
                 switch err {
                 case .contextOverflow where batchSize > config.minBatchSize:
@@ -125,23 +159,44 @@ public actor Classifier {
                     batchSize = config.minBatchSize                        // isolate the culprit
                 default:
                     // Single item still failing → park it in Unsorted, move on.
-                    decisions.append(contentsOf: slice.map {
+                    commit(slice.map {
                         Decision(bookmarkID: $0.id, folder: Taxonomy.unsorted, confidence: 0)
-                    })
+                    }, through: end)
                     unsortedCauses.unmapped += slice.count
-                    index = end
-                    progress?(decisions.count, bookmarks.count)
                 }
             } catch {
-                decisions.append(contentsOf: slice.map {
+                // A cancelled URLSession/model call can surface as something other
+                // than CancellationError; never swallow it into Unsorted.
+                if Task.isCancelled { throw CancellationError() }
+                commit(slice.map {
                     Decision(bookmarkID: $0.id, folder: Taxonomy.unsorted, confidence: 0)
-                })
+                }, through: end)
                 unsortedCauses.unmapped += slice.count
-                index = end
-                progress?(decisions.count, bookmarks.count)
             }
         }
         return decisions
+    }
+
+    /// Largest batch (up to `autoBatchCap`) whose rendered prompt still fits the
+    /// live budget, so the same code adapts to whatever context window the OS
+    /// reports rather than assuming one. A pinned `config.initialBatchSize` wins.
+    func derivedInitialBatchSize(
+        _ bookmarks: [Bookmark],
+        folderBlock: String,
+        enrichments: [String: ContentEnricher.EnrichResult]? = nil
+    ) -> Int {
+        guard config.initialBatchSize <= 0 else { return config.initialBatchSize }
+        guard !bookmarks.isEmpty else { return 1 }
+
+        var size = min(Self.autoBatchCap, bookmarks.count)
+        while size > 1 {
+            let probe = Self.renderPrompt(Array(bookmarks.prefix(size)),
+                                          folderBlock: folderBlock,
+                                          enrichments: enrichments)
+            if budget.fits(instructions: Self.instructions, prompt: probe) { return size }
+            size -= 1
+        }
+        return 1
     }
 
     // MARK: - One batch

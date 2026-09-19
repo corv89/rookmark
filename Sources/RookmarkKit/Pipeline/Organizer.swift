@@ -88,7 +88,8 @@ public struct Organizer: Sendable {
         options: Options,
         enrichmentProgress: EnrichmentProgressHandler? = nil,
         onDeadLink: DeadLinkHandler? = nil,
-        progress: Classifier.ProgressHandler? = nil
+        progress: Classifier.ProgressHandler? = nil,
+        onBatch: Classifier.BatchHandler? = nil
     ) async throws -> Result {
         guard case .available = factory.availability() else {
             if case let .unavailable(reason) = factory.availability() {
@@ -146,13 +147,18 @@ public struct Organizer: Sendable {
         var classifierConfig = options.classifier
         if options.enrich && enrichments != nil {
             let enrichedCount = enrichments?.filter { $0.value.metaDescription != nil }.count ?? 0
-            if enrichedCount > 0 {
+            // Only needed when the size is pinned; the derived path already
+            // measures a prompt that includes the descriptions.
+            if enrichedCount > 0, classifierConfig.initialBatchSize > 0 {
                 classifierConfig.initialBatchSize = min(classifierConfig.initialBatchSize, 4)
             }
         }
 
         let classifier = Classifier(factory: factory, config: classifierConfig, budget: budget, taxonomy: taxonomy)
-        var decisions = await classifier.classify(parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments, progress: progress)
+        var decisions = try await classifier.classify(
+            parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments,
+            progress: progress, onBatch: onBatch
+        )
 
 
         if options.clustering.enabled {
@@ -206,7 +212,11 @@ public struct Organizer: Sendable {
                         }
 
                         let reClassifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
-                        let residueDecisions = await reClassifier.classify(residue, taxonomy: taxonomy)
+                        // Re-placements revise rows the UI already showed, so they
+                        // go out through onBatch too.
+                        let residueDecisions = try await reClassifier.classify(
+                            residue, taxonomy: taxonomy, onBatch: onBatch
+                        )
 
                         let residueDecisionMap = Dictionary(uniqueKeysWithValues: residueDecisions.map { ($0.bookmarkID, $0) })
                         for i in decisions.indices {

@@ -114,10 +114,83 @@ struct ClassifierConfigTests {
         #expect(config.confidenceFloor == 0)
     }
 
-    @Test("default batch size is 6")
+    @Test("batch size defaults to auto so it tracks the live context window")
     func defaultBatchSize() {
-        let config = Classifier.Config()
-        #expect(config.initialBatchSize == 6)
+        #expect(Classifier.Config().initialBatchSize == 0)
+        #expect(Classifier.Config(initialBatchSize: 8).initialBatchSize == 8)
+    }
+}
+
+@Suite("Derived batch size")
+struct DerivedBatchSizeTests {
+
+    private func makeClassifier(contextSize: Int, pinned: Int = 0) -> Classifier {
+        Classifier(
+            factory: SessionFactory(),
+            config: .init(initialBatchSize: pinned),
+            budget: TokenBudget(total: contextSize)
+        )
+    }
+
+    private var bookmarks: [Bookmark] {
+        (0..<40).map {
+            Bookmark(id: "id\($0)", title: "Some bookmark title \($0)", url: "https://example.com/page/\($0)")
+        }
+    }
+
+    @Test("a larger context window admits a larger batch")
+    func scalesWithWindow() async {
+        let block = "Development: code things\nDesign: visual things\n"
+        let small = await makeClassifier(contextSize: 4096)
+            .derivedInitialBatchSize(bookmarks, folderBlock: block)
+        let large = await makeClassifier(contextSize: 8192)
+            .derivedInitialBatchSize(bookmarks, folderBlock: block)
+
+        #expect(small >= 1)
+        #expect(large >= small, "a bigger window must never yield a smaller batch")
+        #expect(large <= Classifier.autoBatchCap)
+    }
+
+    @Test("a taxonomy that eats the window shrinks the batch")
+    func shrinksForLargeTaxonomy() async {
+        let small = String(repeating: "Folder: a long rationale describing it\n", count: 20)
+        let huge = String(repeating: "Folder: a long rationale describing it\n", count: 500)
+
+        let roomy = await makeClassifier(contextSize: 4096)
+            .derivedInitialBatchSize(bookmarks, folderBlock: small)
+        let cramped = await makeClassifier(contextSize: 4096)
+            .derivedInitialBatchSize(bookmarks, folderBlock: huge)
+
+        #expect(cramped < roomy, "a bigger taxonomy must leave room for fewer items")
+        #expect(cramped == 1, "nothing fits, so fall back to one at a time")
+    }
+
+    @Test("an explicit batch size overrides derivation")
+    func pinnedWins() async {
+        let size = await makeClassifier(contextSize: 8192, pinned: 3)
+            .derivedInitialBatchSize(bookmarks, folderBlock: "Development: code\n")
+        #expect(size == 3)
+    }
+
+    /// The old catch-all swallowed CancellationError, filed the rest of the run
+    /// under Unsorted and reported success. Cancelling must surface instead.
+    @Test("cancellation propagates rather than becoming Unsorted decisions")
+    func cancellationPropagates() async {
+        let classifier = makeClassifier(contextSize: 8192)
+        let taxonomy = Taxonomy(folders: [.init(name: "Development", rationale: "code")])
+        let items = bookmarks
+
+        let task = Task { try await classifier.classify(items, taxonomy: taxonomy) }
+        task.cancel()
+
+        do {
+            let decisions = try await task.value
+            Issue.record("expected CancellationError, got \(decisions.count) decisions")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            Issue.record("expected CancellationError, got \(error)")
+        }
     }
 }
 

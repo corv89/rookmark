@@ -1,7 +1,9 @@
 import Foundation
 import FoundationModels
 
-/// Token accounting against the on-device model's 4 096-token window.
+/// Token accounting against whatever context window the model reports. The size
+/// varies by OS version (4 096 on some, 8 192 on macOS 27), so `total` is always
+/// passed in from `SessionFactory.contextSize()` rather than assumed here.
 ///
 /// Apple notes the error can fire even when input alone is < 4 096, because the
 /// model must also fit its *response* in the same window — so we always reserve

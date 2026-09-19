@@ -103,6 +103,8 @@ struct ContentView: View {
                 Text("~\(Int((Double(total - done)) * 1.1))s left")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                Button("Stop") { model.cancel() }
+                    .help("Stop after the current batch and keep what is done")
             } else if case .finishing = model.phase {
                 ProgressView().controlSize(.small)
                 Text("Grouping leftovers, naming new folders…")
@@ -141,7 +143,8 @@ struct ContentView: View {
             notice(message, systemImage: "exclamationmark.triangle", tint: .orange)
         case .scanning:
             notice("Reading the Orion profile…", systemImage: "magnifyingglass")
-        case .classifying, .finishing:
+        // Once rows start streaming in, switch to the table and let it fill.
+        case .classifying where model.rows.isEmpty, .finishing where model.rows.isEmpty:
             working
         case .idle where model.rows.isEmpty:
             notice(
@@ -340,6 +343,10 @@ struct ContentView: View {
     private var exportBar: some View {
         HStack(spacing: 14) {
             Text("**\(model.includedCount)** of \(model.rows.count) included")
+            if model.wasCancelled {
+                Text("stopped early")
+                    .foregroundStyle(.orange)
+            }
             if !model.newFolders.isEmpty {
                 Text("new folders: \(model.newFolders.joined(separator: ", "))")
                     .foregroundStyle(.secondary)

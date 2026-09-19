@@ -20,7 +20,7 @@ struct Organize: AsyncParsableCommand {
     var stateful = false
 
     @Option(help: "Initial classification batch size (auto-shrinks on context overflow).")
-    var batchSize: Int = 6
+    var batchSize: Int = 0
 
     @Option(name: .customLong("confidence-floor"), help: "Minimum confidence (0-100) to accept a classification. Items below this are routed to Unsorted. Set to 0 to disable.")
     var confidenceFloor: Int = 15

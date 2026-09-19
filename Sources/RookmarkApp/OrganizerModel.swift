@@ -60,6 +60,8 @@ final class OrganizerModel {
     private(set) var newFolders: [String] = []
     private(set) var taxonomyFolderCount = 0
     private(set) var lastRunSeconds: Double?
+    /// True when the last run was stopped early, so the table is partial.
+    private(set) var wasCancelled = false
 
     // Review state
     var search = ""
@@ -69,6 +71,12 @@ final class OrganizerModel {
 
     private var pinnedTaxonomy: Taxonomy?
     private var rationales: [String: String] = [:]
+    /// The detached worker. Held because a detached task does NOT inherit
+    /// cancellation from whoever started it, so Stop has to cancel it directly.
+    private var runTask: Task<Organizer.Result, Error>?
+    /// Titles/URLs for the current run, so streamed decisions (which carry only
+    /// a bookmark id) can be turned into rows before the run finishes.
+    private var inFlight: [String: Bookmark] = [:]
 
     var visibleRows: [Row] {
         var out = rows
@@ -166,6 +174,7 @@ final class OrganizerModel {
         newFolders = []
         selectedFolder = nil
         selectedRowID = nil
+        wasCancelled = false
         phase = .classifying(done: 0, total: sample.count)
         let started = Date()
 
@@ -178,9 +187,17 @@ final class OrganizerModel {
             enrich: false          // never block the run on the network
         )
 
+        inFlight = Dictionary(sample.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
         let onProgress: Classifier.ProgressHandler = { [weak self] done, total in
             Task { @MainActor in
                 self?.phase = done >= total ? .finishing : .classifying(done: done, total: total)
+            }
+        }
+
+        let onBatch: Classifier.BatchHandler = { [weak self] decisions in
+            Task { @MainActor in
+                self?.apply(decisions)
             }
         }
 
@@ -190,9 +207,14 @@ final class OrganizerModel {
             // main-actor isolation and block the UI for the whole run — the
             // progress bar then sits still and every queued update flushes at
             // the end. Detaching guarantees it lands on the cooperative pool.
-            let result = try await Task.detached(priority: .userInitiated) {
-                try await Organizer().organize(html: html, options: options, progress: onProgress)
-            }.value
+            let work = Task.detached(priority: .userInitiated) {
+                try await Organizer().organize(
+                    html: html, options: options, progress: onProgress, onBatch: onBatch
+                )
+            }
+            runTask = work
+            defer { runTask = nil }
+            let result = try await work.value
 
             // Clustering can mint folders that weren't in the pinned taxonomy.
             let known = Set(taxonomy.names)
@@ -201,38 +223,61 @@ final class OrganizerModel {
                 rationales[folder.name] = folder.rationale
             }
 
-            let choiceByID = Dictionary(
-                result.decisions.map { ($0.bookmarkID, $0.modelChosenFolder) },
-                uniquingKeysWith: { first, _ in first }
-            )
-
-            rows = result.bookmarks.map { bookmark in
-                let folder = bookmark.assignedFolder ?? Taxonomy.unsorted
-                let choice = choiceByID[bookmark.id] ?? nil
-                return Row(
-                    id: bookmark.id,
-                    title: bookmark.title.isEmpty ? bookmark.url : bookmark.title,
-                    url: bookmark.url,
-                    folder: folder,
-                    confidence: bookmark.confidence ?? 0,
-                    modelChoice: (choice != folder) ? choice : nil
-                )
-            }
-
-            folders = Dictionary(grouping: rows, by: \.folder)
-                .map { FolderGroup(name: $0.key, count: $0.value.count, rationale: rationales[$0.key] ?? "") }
-                .sorted {
-                    // Unsorted always last; otherwise biggest first.
-                    if $0.name == Taxonomy.unsorted { return false }
-                    if $1.name == Taxonomy.unsorted { return true }
-                    return ($0.count, $1.name) > ($1.count, $0.name)
-                }
-
+            // Final reconciliation. Going through `apply` rather than rebuilding
+            // the array keeps any include/judgement state set during the run,
+            // and settles rows that clustering re-placed after they were shown.
+            apply(result.decisions)
+            lastRunSeconds = Date().timeIntervalSince(started)
+            phase = .finished
+        } catch is CancellationError {
+            // Everything already streamed in stays on screen; only the items the
+            // model never reached are missing, and they are absent rather than
+            // wrongly filed under Unsorted.
+            wasCancelled = true
+            recountFolders()
             lastRunSeconds = Date().timeIntervalSince(started)
             phase = .finished
         } catch {
             phase = .failed(String(describing: error))
         }
+        inFlight = [:]
+    }
+
+    /// Merges a batch of decisions into the table while the run continues.
+    /// Keyed by bookmark id because Phase 2 clustering re-places items that
+    /// first came back Unsorted; appending blindly would leave the stale row
+    /// alongside its replacement.
+    private func apply(_ decisions: [Classifier.Decision]) {
+        for decision in decisions {
+            guard let bookmark = inFlight[decision.bookmarkID] else { continue }
+            let row = Row(
+                id: decision.bookmarkID,
+                title: bookmark.title.isEmpty ? bookmark.url : bookmark.title,
+                url: bookmark.url,
+                folder: decision.folder,
+                confidence: decision.confidence,
+                modelChoice: decision.modelChosenFolder != decision.folder
+                    ? decision.modelChosenFolder : nil
+            )
+            if let existing = rows.firstIndex(where: { $0.id == decision.bookmarkID }) {
+                // Preserve any judgement or include state the user already set.
+                rows[existing] = Row(
+                    id: row.id, title: row.title, url: row.url,
+                    folder: row.folder, confidence: row.confidence,
+                    modelChoice: row.modelChoice,
+                    included: rows[existing].included,
+                    accepted: rows[existing].accepted
+                )
+            } else {
+                rows.append(row)
+            }
+        }
+        recountFolders()
+    }
+
+    /// Stops the run and keeps whatever has already been classified.
+    func cancel() {
+        runTask?.cancel()
     }
 
     // MARK: - Review actions
