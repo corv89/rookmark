@@ -30,8 +30,8 @@ each one, without exposing any of your content.
 - macOS 26 or later, Apple Silicon, with Apple Intelligence enabled
 - Xcode 26+ toolchain to build
 
-The classifier is Apple's `FoundationModels` system model, which exists only on
-this configuration. There is no Linux or Intel target currently, sorry!
+The classifier is Apple's `FoundationModels` system model.
+There is no Linux or Intel support currently, sorry!
 
 ## Install
 
@@ -67,7 +67,7 @@ and therefore shows up as `RookmarkApp` rather than `Rookmark`:
 swift run -c release RookmarkApp
 ```
 
-Reads the installed Orion profile, classifies a sample or the whole library, and
+Reads the installed [Orion](https://browser.kagi.com/) profile, classifies a sample or the whole library, and
 presents the result for review: folders with counts down the side, items sorted
 least-confident-first so your attention lands where the model is weakest, and an
 inspector explaining why each item went where it did. Nothing is written until
