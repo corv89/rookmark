@@ -15,13 +15,19 @@ final class OrganizerModel {
         /// What the model picked before the confidence floor could demote it.
         /// Explains items that landed in Unsorted despite the model having a view.
         let modelChoice: String?
-        /// Included in the export. The real product control — distinct from the
-        /// thumbs, which only record the presenter's judgement of quality.
-        var included = true
-        var accepted: Bool?
+        /// Accepted, and therefore part of the export. One control rather than a
+        /// separate include flag and quality vote: rejecting a placement and
+        /// leaving it out of the file are the same intent, and anything that
+        /// belongs elsewhere is moved rather than voted down.
+        var accepted = true
 
         var isUnsorted: Bool { folder == Taxonomy.unsorted }
     }
+
+    /// Sentinel for the sidebar's "All" row. A List selection binding cannot
+    /// carry nil, so the unfiltered case needs a real value; no folder can be
+    /// empty-named, which makes "" safe.
+    static let allFolders = ""
 
     struct FolderGroup: Identifiable {
         var id: String { name }
@@ -70,7 +76,7 @@ final class OrganizerModel {
     // Review state
     var search = ""
     var sort: Sort = .leastConfident
-    var selectedFolder: String?
+    var selectedFolder: String? = OrganizerModel.allFolders
     var selectedRowID: String?
 
     private var pinnedTaxonomy: Taxonomy?
@@ -84,7 +90,7 @@ final class OrganizerModel {
 
     var visibleRows: [Row] {
         var out = rows
-        if let selectedFolder {
+        if let selectedFolder, selectedFolder != Self.allFolders {
             out = out.filter { $0.folder == selectedFolder }
         }
         if !search.isEmpty {
@@ -108,18 +114,8 @@ final class OrganizerModel {
 
     func rationale(for folder: String) -> String? { rationales[folder] }
 
-    var includedCount: Int { rows.count { $0.included } }
+    var acceptedCount: Int { rows.count(where: \.accepted) }
     var sortedCount: Int { rows.count { !$0.isUnsorted } }
-
-    var judged: (accepted: Int, rejected: Int) {
-        rows.reduce(into: (0, 0)) { counts, row in
-            switch row.accepted {
-            case true: counts.0 += 1
-            case false: counts.1 += 1
-            case nil: break
-            }
-        }
-    }
 
     var isBusy: Bool {
         switch phase {
@@ -178,7 +174,7 @@ final class OrganizerModel {
             .map {
                 Row(id: $0.id, title: $0.title, url: $0.url, folder: $0.folder,
                     confidence: $0.confidence, modelChoice: $0.modelChoice,
-                    included: $0.included, accepted: $0.accepted)
+                    accepted: $0.accepted)
             }
         newFolders = snapshot.newFolders
 
@@ -195,7 +191,7 @@ final class OrganizerModel {
             rows: rows.map {
                 .init(id: $0.id, title: $0.title, url: $0.url, folder: $0.folder,
                       confidence: $0.confidence, modelChoice: $0.modelChoice,
-                      included: $0.included, accepted: $0.accepted)
+                      accepted: $0.accepted)
             },
             newFolders: newFolders,
             completed: completed
@@ -209,7 +205,7 @@ final class OrganizerModel {
         folders = []
         newFolders = []
         staleness = nil
-        selectedFolder = nil
+        selectedFolder = Self.allFolders
         selectedRowID = nil
         phase = .idle
     }
@@ -227,7 +223,7 @@ final class OrganizerModel {
         guard let taxonomy = pinnedTaxonomy, !sample.isEmpty else { return }
 
         // Rows already decided are kept: this may be a resume.
-        selectedFolder = nil
+        selectedFolder = Self.allFolders
         selectedRowID = nil
         wasCancelled = false
         staleness = nil
@@ -333,7 +329,6 @@ final class OrganizerModel {
                     id: row.id, title: row.title, url: row.url,
                     folder: row.folder, confidence: row.confidence,
                     modelChoice: row.modelChoice,
-                    included: rows[existing].included,
                     accepted: rows[existing].accepted
                 )
             } else {
@@ -351,15 +346,11 @@ final class OrganizerModel {
 
     // MARK: - Review actions
 
-    func judge(_ id: String, accepted: Bool) {
+    /// Accepting is the single review control: it marks the placement good
+    /// and keeps it in the export. Unchecking does both jobs at once.
+    func toggleAccepted(_ id: String) {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
-        rows[index].accepted = rows[index].accepted == accepted ? nil : accepted
-        saveSession(completed: remaining.isEmpty)
-    }
-
-    func toggleIncluded(_ id: String) {
-        guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
-        rows[index].included.toggle()
+        rows[index].accepted.toggle()
         saveSession(completed: remaining.isEmpty)
     }
 
@@ -369,7 +360,7 @@ final class OrganizerModel {
         rows[index] = Row(
             id: row.id, title: row.title, url: row.url,
             folder: folder, confidence: row.confidence, modelChoice: row.modelChoice,
-            included: row.included, accepted: row.accepted
+            accepted: row.accepted
         )
         recountFolders()
         saveSession(completed: remaining.isEmpty)
@@ -390,7 +381,7 @@ final class OrganizerModel {
 
     /// Writes a *new* HTML file. The live browser is never touched.
     func exportOrganized() throws -> URL {
-        let byID = Dictionary(uniqueKeysWithValues: rows.filter(\.included).map { ($0.id, $0) })
+        let byID = Dictionary(uniqueKeysWithValues: rows.filter(\.accepted).map { ($0.id, $0) })
         let organized = allBookmarks.compactMap { bookmark -> Bookmark? in
             guard let row = byID[bookmark.id] else { return nil }
             var copy = bookmark

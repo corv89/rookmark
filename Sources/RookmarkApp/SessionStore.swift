@@ -26,8 +26,7 @@ enum SessionStore {
         var folder: String
         var confidence: Int
         var modelChoice: String?
-        var included: Bool
-        var accepted: Bool?
+        var accepted: Bool
     }
 
     /// How the saved run relates to what is in the browser right now.

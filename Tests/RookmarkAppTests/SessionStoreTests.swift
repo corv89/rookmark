@@ -14,7 +14,7 @@ struct SessionStoreTests {
     private func row(_ id: String) -> SessionStore.StoredRow {
         .init(id: id, title: "Title \(id)", url: "https://example.com/\(id)",
               folder: "Development", confidence: 90, modelChoice: nil,
-              included: true, accepted: nil)
+              accepted: true)
     }
 
     private func snapshot(source: [String], classified: [String]) -> SessionStore.Snapshot {

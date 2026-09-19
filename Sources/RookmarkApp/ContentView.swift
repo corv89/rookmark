@@ -254,7 +254,10 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $model.selectedFolder) {
             Section("Folders") {
-                folderRow(name: "All", count: model.rows.count, tag: nil as String?)
+                // Tagged with the sentinel rather than nil: a List selection
+                // binding cannot carry nil, so a nil-tagged row is unselectable
+                // and there is no way back to the unfiltered view.
+                folderRow(name: "All", count: model.rows.count, tag: OrganizerModel.allFolders)
                 ForEach(model.folders) { folder in
                     folderRow(name: folder.name, count: folder.count, tag: folder.name)
                 }
@@ -264,9 +267,9 @@ struct ContentView: View {
         .frame(width: 220)
     }
 
-    private func folderRow(name: String, count: Int, tag: String?) -> some View {
+    private func folderRow(name: String, count: Int, tag: String) -> some View {
         HStack(spacing: 8) {
-            if let tag {
+            if tag != OrganizerModel.allFolders {
                 Circle()
                     .fill(name == Taxonomy.unsorted ? Color.secondary : folderTint(tag))
                     .frame(width: 8, height: 8)
@@ -287,11 +290,11 @@ struct ContentView: View {
         List(model.visibleRows, selection: $model.selectedRowID) { row in
             HStack(spacing: 10) {
                 Toggle("", isOn: Binding(
-                    get: { row.included },
-                    set: { _ in model.toggleIncluded(row.id) }
+                    get: { row.accepted },
+                    set: { _ in model.toggleAccepted(row.id) }
                 ))
                 .labelsHidden()
-                .help("Include in the exported file")
+                .help("Accept this placement and include it in the export")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.title).lineLimit(1)
@@ -313,28 +316,13 @@ struct ContentView: View {
                     .foregroundStyle(row.isUnsorted ? Color.secondary : folderTint(row.folder))
 
                 ConfidenceBadge(value: row.confidence)
-
-                HStack(spacing: 4) {
-                    judgeButton(row, accepted: true, systemImage: "hand.thumbsup.fill", tint: .green)
-                    judgeButton(row, accepted: false, systemImage: "hand.thumbsdown.fill", tint: .red)
-                }
             }
             .padding(.vertical, 2)
+            .opacity(row.accepted ? 1 : 0.45)
             .tag(row.id)
         }
         .listStyle(.inset)
         .frame(minHeight: 200)
-    }
-
-    private func judgeButton(_ row: OrganizerModel.Row, accepted: Bool, systemImage: String, tint: Color) -> some View {
-        Button {
-            model.judge(row.id, accepted: accepted)
-        } label: {
-            Image(systemName: systemImage)
-                .foregroundStyle(row.accepted == accepted ? tint : Color.secondary.opacity(0.4))
-        }
-        .buttonStyle(.plain)
-        .help(accepted ? "Good placement" : "Wrong placement")
     }
 
     // MARK: - Inspector: why this folder?
@@ -391,20 +379,11 @@ struct ContentView: View {
 
     private var exportBar: some View {
         HStack(spacing: 14) {
-            Text("**\(model.includedCount)** of \(model.rows.count) included")
-            if model.wasCancelled {
-                Text("stopped early")
-                    .foregroundStyle(.orange)
-            }
+            Text("**\(model.acceptedCount)** of \(model.rows.count) accepted")
             if !model.newFolders.isEmpty {
                 Text("new folders: \(model.newFolders.joined(separator: ", "))")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-            }
-            let judged = model.judged
-            if judged.accepted + judged.rejected > 0 {
-                Text("judged \(judged.accepted) good · \(judged.rejected) wrong")
-                    .foregroundStyle(.secondary)
             }
             Spacer()
             if let exportedPath {
@@ -417,7 +396,7 @@ struct ContentView: View {
             Button("Export a copy…") {
                 exportedPath = try? model.exportOrganized().path(percentEncoded: false)
             }
-            .disabled(model.includedCount == 0)
+            .disabled(model.acceptedCount == 0)
         }
         .font(.callout)
         .padding(.horizontal, 20)
