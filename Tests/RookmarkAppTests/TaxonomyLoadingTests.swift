@@ -5,8 +5,9 @@ import Testing
 @testable import RookmarkApp
 
 /// The shipped app must load its pinned taxonomy on any machine, not just a
-/// checkout. `loadPinnedTaxonomy` reads the source tree first (fresh during
-/// development) and falls back to the bundled copy; these tests pin both
+/// checkout. `loadPinnedTaxonomy` reads the source tree first — a DEBUG-only
+/// development convenience — and otherwise resolves through the bundled
+/// copy, which is the only tier in a release build; these tests pin both
 /// halves of that contract so the app cannot regress to dead-on-arrival.
 @Suite("Pinned taxonomy loading")
 struct TaxonomyLoadingTests {
