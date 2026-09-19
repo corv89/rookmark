@@ -163,6 +163,34 @@ final class OrganizerModel {
     /// a bookmark id) can be turned into rows before the run finishes.
     private var inFlight: [String: Bookmark] = [:]
 
+    // Completion notification
+    /// Delivers the run-finished ping. Protocol-typed so tests can substitute
+    /// a recorder; the default posts through UNUserNotificationCenter.
+    private let notifications: any NotificationPosting
+    /// Whether the user can see Rookmark right now, read live when a run
+    /// finishes rather than armed when it starts — a run minimized halfway is
+    /// still out of sight at the end. A stored closure so tests can pin
+    /// either answer without a live NSApplication; the `@MainActor` on the
+    /// type is what lets the default read the main-actor-isolated AppKit
+    /// state without a concurrency error under Swift 6 language mode.
+    private let isAppVisible: @MainActor () -> Bool
+    /// The latest answer from the authorization seam, re-resolved at each
+    /// Organize. False until the first one, so nothing can ping before the
+    /// user has been asked.
+    private var isNotificationAuthorized = false
+
+    /// Both notification inputs are injected with production defaults, so
+    /// `OrganizerModel()` stays the one constructor the app and the other
+    /// suites use, while these tests can pin the two answers independently.
+    /// Constant here: nothing re-aims them mid-run.
+    init(
+        notifications: any NotificationPosting = SystemNotifier(),
+        isAppVisible: @escaping @MainActor () -> Bool = { AppVisibility.isOnScreen }
+    ) {
+        self.notifications = notifications
+        self.isAppVisible = isAppVisible
+    }
+
     var visibleRows: [Row] {
         var out = rows
         if let selectedFolder, selectedFolder != Self.allFolders {
@@ -525,6 +553,7 @@ final class OrganizerModel {
     /// button rather than a size picker.
     func organize() async {
         guard isModelAvailable else { return }
+        await refreshNotificationAuthorization()
         await classify(remaining)
     }
 
@@ -598,7 +627,7 @@ final class OrganizerModel {
             // and settles rows that clustering re-placed after they were shown.
             apply(result.decisions)
             lastRunSeconds = Date().timeIntervalSince(started)
-            phase = .finished
+            await updatePhase(.finished)
             saveSession(completed: remaining.isEmpty)
         } catch is CancellationError {
             // Everything already streamed in stays on screen; only the items the
@@ -607,7 +636,7 @@ final class OrganizerModel {
             wasCancelled = true
             recountFolders()
             lastRunSeconds = Date().timeIntervalSince(started)
-            phase = remaining.isEmpty ? .finished : .paused
+            await updatePhase(remaining.isEmpty ? .finished : .paused)
             saveSession(completed: remaining.isEmpty)
         } catch {
             phase = .failed(String(describing: error))
@@ -651,6 +680,55 @@ final class OrganizerModel {
     /// Resuming is just `organize()` again, which picks up `remaining`.
     func pause() {
         runTask?.cancel()
+    }
+
+    // MARK: - Completion notification
+
+    /// Runs at every Organize, including every resume. The permission prompt
+    /// itself is kept once-only by the system — requestAuthorization presents
+    /// UI only while the status is .notDetermined and answers immediately for
+    /// any other — so re-checking here never re-prompts. It does mean a user
+    /// who flips Rookmark on in System Settings after a reflexive "Don't
+    /// Allow" is picked up at the next run instead of being locked out for
+    /// the session, which a set-once flag would have cost. A denial just
+    /// means no ping; the run proceeds regardless.
+    private func refreshNotificationAuthorization() async {
+        isNotificationAuthorized = await notifications.requestAuthorizationIfNeeded()
+    }
+
+    /// The seam both completion sites in classify(_:) use: the plain finish
+    /// and the cancellation ternary's finished-vs-paused outcome are handed
+    /// to `phase` through here rather than assigned directly, which is what
+    /// lets the notification decision be driven from tests without the
+    /// model. The decision keys off the phase, not the call site: `.paused`
+    /// arrives through this same seam and deliberately posts nothing. Every
+    /// other `phase` assignment (.idle, .scanning, .classifying, .finishing,
+    /// .failed) stays direct because none is a completion — with one
+    /// consequence worth stating: a future direct `phase = .finished` would
+    /// compile fine and silently never ping, so completions must enter
+    /// through this method.
+    func updatePhase(_ newValue: Phase) async {
+        phase = newValue
+        guard case .finished = newValue else { return }
+        await notifyCompletion()
+    }
+
+    /// One notification when a run finishes out of sight. Suppressed when
+    /// the user is looking at Rookmark — frontmost with a window actually on
+    /// screen, so minimizing or closing the window does not count as looking
+    /// — and when no permission was granted. Never for pause (a user action
+    /// they just took) or failure (the in-app notice already owns the
+    /// screen).
+    private func notifyCompletion() async {
+        guard isNotificationAuthorized, !isAppVisible() else { return }
+        // The numerator is sortedCount, not acceptedCount: `accepted`
+        // defaults to true, so a background run the user never touched would
+        // report every row as sorted — including the ones parked in
+        // Unsorted, which the app itself treats as not sorted (the sidebar
+        // calls it "Without a folder"; the footer calls the other number
+        // "accepted"). Grouped like every other count in the sidebar.
+        let body = "\(sortedCount.formatted(.number)) of \(rows.count.formatted(.number)) bookmarks sorted. Review and export when ready."
+        await notifications.post(title: "Rookmark", body: body)
     }
 
     // MARK: - Review actions
