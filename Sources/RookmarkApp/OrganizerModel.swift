@@ -184,7 +184,10 @@ final class OrganizerModel {
 
     /// Save seam: tests construct with `false` so a review action in a unit
     /// test can never write the host machine's real `session.json` — the same
-    /// reason ImportSourceTests imports from `.invalid` hosts.
+    /// reason ImportSourceTests imports from `.invalid` hosts. It gates every
+    /// mutation of that file, deletions included: `swift test` runs the whole
+    /// suite on the user's Mac, and an ungated Discard there would delete the
+    /// live session — the exact data this store exists to protect.
     private let persistsSessions: Bool
 
     /// Both notification inputs are injected with production defaults, so
@@ -448,7 +451,9 @@ final class OrganizerModel {
 
             // Only now, with the new source actually readable, does the confirmed
             // replacement throw the old run away — a failed import must not.
-            if discardingSession { SessionStore.clear() }
+            // Gated by the same seam as save/discard: a test model never
+            // mutates the host's real session file.
+            if persistsSessions, discardingSession { SessionStore.clear() }
 
             // The scan starts from the bundled taxonomy; a restored snapshot
             // then layers its own edited copy on top (restoreSession).
@@ -551,7 +556,12 @@ final class OrganizerModel {
 
     /// Throws the saved run away and starts from nothing.
     func discardSession() {
-        SessionStore.clear()
+        // Gated like saveSession: a test model (persistsSessions == false)
+        // must reset its in-memory state without ever touching the host's
+        // real session file — `swift test` runs the whole suite on the user's
+        // Mac, and an unconditional delete there destroys the live review
+        // session this store exists to protect.
+        if persistsSessions { SessionStore.clear() }
         rows = []
         folders = []
         newFolders = []
