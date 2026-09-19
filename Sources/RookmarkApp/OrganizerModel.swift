@@ -78,32 +78,26 @@ final class OrganizerModel {
 
     /// What the UI needs to know about the on-device model: the notice text
     /// and whether System Settings can change the outcome. The kit reports a
-    /// described reason string (`SessionFactory.describe`); deciding what the
-    /// app does about each reason is presentation, so the mapping lives here.
+    /// structured kind plus a described reason string; deciding what the app
+    /// does about each kind is presentation, so the mapping lives here.
     enum ModelAvailability: Equatable {
         case available
         case unavailable(reason: String, showsSettingsLink: Bool)
 
-        init(_ availability: SessionFactory.Availability) {
-            switch availability {
+        init(_ status: SessionFactory.AvailabilityStatus) {
+            switch status {
             case .available:
                 self = .available
-            case .unavailable(let reason):
-                // Every reason can be acted on from the Apple Intelligence &
+            case .unavailable(let kind, let reason):
+                // Every kind can be acted on from the Apple Intelligence &
                 // Siri pane (off → turn on, not ready → watch the download)
                 // except an ineligible Mac, where there is nothing to enable.
-                // That wording is `SessionFactory.describe(.deviceNotEligible)`
-                // — the kit's stable string — matched by prefix so trailing
-                // edits don't break it.
                 self = .unavailable(
                     reason: reason,
-                    showsSettingsLink: !reason.hasPrefix(Self.ineligiblePrefix)
+                    showsSettingsLink: kind != .deviceNotEligible
                 )
             }
         }
-
-        /// ASCII apostrophe, byte-identical to SessionFactory.swift:58.
-        private static let ineligiblePrefix = "This Mac isn't eligible"
     }
 
     // Profile
@@ -151,7 +145,7 @@ final class OrganizerModel {
     /// On-device model availability, re-read at scan time and on every app
     /// activation. Never latch a result: Apple Intelligence can be turned on
     /// while Rookmark is running.
-    private(set) var availability: SessionFactory.Availability = .available
+    private(set) var availability: SessionFactory.AvailabilityStatus = .available
 
     // Review state
     var search = ""
@@ -266,14 +260,14 @@ final class OrganizerModel {
     }
 
     /// Production path: `SessionFactory` is Sendable and the check is a cheap
-    /// synchronous status read (same call `doctor` makes).
+    /// synchronous status read (same probe `doctor` makes).
     func refreshModelAvailability() {
-        availability = SessionFactory().availability()
+        availability = SessionFactory().availabilityStatus()
     }
 
     /// State-update half split out so tests can drive it without the real
     /// model — FoundationModels cannot run in CI.
-    func updateAvailability(_ newValue: SessionFactory.Availability) {
+    func updateAvailability(_ newValue: SessionFactory.AvailabilityStatus) {
         availability = newValue
     }
 

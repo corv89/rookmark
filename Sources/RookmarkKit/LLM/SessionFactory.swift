@@ -15,6 +15,27 @@ public struct SessionFactory: Sendable {
         case unavailable(reason: String)
     }
 
+    /// Why the on-device model is unavailable, as data rather than prose.
+    /// Mirrors `SystemLanguageModel`'s UnavailableReason so consumers can
+    /// branch on the cause — an ineligible Mac has no System Settings remedy —
+    /// without matching `describe` strings. `unknown` covers future framework
+    /// reasons.
+    public enum UnavailableKind: Sendable, Equatable {
+        case deviceNotEligible
+        case appleIntelligenceNotEnabled
+        case modelNotReady
+        case unknown
+    }
+
+    /// The availability check with its cause attached: `Availability` plus
+    /// the structured kind. `availability()` (prose only) stays for consumers
+    /// that never branch on the reason — the CLI and Organizer's
+    /// precondition; read this instead when a decision depends on the cause.
+    public enum AvailabilityStatus: Sendable, Equatable {
+        case available
+        case unavailable(kind: UnavailableKind, reason: String)
+    }
+
     /// Last-resort floor only. The window is NOT a constant: 4 096 was the
     /// documented figure, but macOS 27 reports 8 192. Always read `contextSize()`
     /// rather than assuming either — code that hardcodes one will either waste
@@ -27,15 +48,38 @@ public struct SessionFactory: Sendable {
 
     public init() {}
 
-    /// Synchronous availability check suitable for `doctor` / preconditions.
-    public func availability() -> Availability {
+    /// Synchronous availability check with the structured cause. Same probe
+    /// as `availability()`; one value carrying both the decision input and
+    /// the display text.
+    public func availabilityStatus() -> AvailabilityStatus {
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available
         case .unavailable(let reason):
-            return .unavailable(reason: Self.describe(reason))
+            return .unavailable(kind: Self.kind(of: reason), reason: Self.describe(reason))
         @unknown default:
-            return .unavailable(reason: "Unknown availability state.")
+            return .unavailable(kind: .unknown, reason: "Unknown availability state.")
+        }
+    }
+
+    /// Synchronous availability check suitable for `doctor` / preconditions.
+    /// Prose only — a reason string for display. Callers that need to branch
+    /// on the cause use `availabilityStatus()`.
+    public func availability() -> Availability {
+        switch availabilityStatus() {
+        case .available:
+            return .available
+        case .unavailable(_, let reason):
+            return .unavailable(reason: reason)
+        }
+    }
+
+    static func kind(of reason: SystemLanguageModel.Availability.UnavailableReason) -> UnavailableKind {
+        switch reason {
+        case .deviceNotEligible: .deviceNotEligible
+        case .appleIntelligenceNotEnabled: .appleIntelligenceNotEnabled
+        case .modelNotReady: .modelNotReady
+        @unknown default: .unknown
         }
     }
 
