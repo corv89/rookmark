@@ -76,11 +76,14 @@ public actor Classifier {
 
     private static let instructions = """
     You sort web bookmarks into folders. You are given a list of allowed folders \
-    (name: description) and a list of items, each as `id | title | url`. \
+    (name: description) and a list of items, each as `id | title | url` and \
+    optionally `| description` (a meta description of the page content). \
     For every item, choose the single best-fitting folder from the allowed list. \
-    Focus on what the page is actually about based on its title and URL path, \
-    not just the domain name. For example, a Wikipedia article about electric \
-    vehicles belongs in the EV folder, not Search & Reference. \
+    Focus on what the page is actually about based on its title, URL path, and \
+    description (when available), not just the domain name. For example, a \
+    Wikipedia article about electric vehicles belongs in the EV folder, not \
+    Search & Reference. Use the description to disambiguate when the title and \
+    URL are ambiguous. \
     If none fits well, choose "Unsorted". Return exactly one assignment per item \
     and echo each id exactly. Do not invent folders.
     """
@@ -90,6 +93,7 @@ public actor Classifier {
     public func classify(
         _ bookmarks: [Bookmark],
         taxonomy: Taxonomy,
+        enrichments: [String: ContentEnricher.EnrichResult]? = nil,
         progress: ProgressHandler? = nil
     ) async -> [Decision] {
         let allowed = Set(taxonomy.allowedFolderNames.map(Self.canonical))
@@ -106,7 +110,8 @@ public actor Classifier {
 
             do {
                 let batch = try await classifyBatch(slice, folderBlock: folderBlock,
-                                                     allowed: allowed, taxonomy: taxonomy)
+                                                     allowed: allowed, taxonomy: taxonomy,
+                                                     enrichments: enrichments)
                 decisions.append(contentsOf: batch)
                 index = end
                 progress?(decisions.count, bookmarks.count)
@@ -145,11 +150,10 @@ public actor Classifier {
         _ slice: [Bookmark],
         folderBlock: String,
         allowed: Set<String>,
-        taxonomy: Taxonomy
+        taxonomy: Taxonomy,
+        enrichments: [String: ContentEnricher.EnrichResult]? = nil
     ) async throws -> [Decision] {
-        // Local ids (b0, b1, …) keep the prompt tiny and avoid the model echoing
-        // long URLs back at us.
-        let prompt = Self.renderPrompt(slice, folderBlock: folderBlock)
+        let prompt = Self.renderPrompt(slice, folderBlock: folderBlock, enrichments: enrichments)
         guard budget.fits(instructions: Self.instructions, prompt: prompt) else {
             throw ClassifierError.contextOverflow
         }
@@ -223,9 +227,17 @@ public actor Classifier {
         return (lines + ["- \(Taxonomy.unsorted): anything that fits nowhere above"]).joined(separator: "\n")
     }
 
-    static func renderPrompt(_ slice: [Bookmark], folderBlock: String) -> String {
+    static func renderPrompt(
+        _ slice: [Bookmark],
+        folderBlock: String,
+        enrichments: [String: ContentEnricher.EnrichResult]? = nil
+    ) -> String {
         let items = slice.enumerated().map { i, b in
-            "b\(i) | \(b.title.isEmpty ? "(untitled)" : b.title) | \(b.url)"
+            var line = "b\(i) | \(b.title.isEmpty ? "(untitled)" : b.title) | \(b.url)"
+            if let desc = enrichments?[b.id]?.metaDescription, !desc.isEmpty {
+                line += " | \(desc)"
+            }
+            return line
         }.joined(separator: "\n")
         return """
         Allowed folders:

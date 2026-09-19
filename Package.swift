@@ -12,6 +12,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "lazybm", targets: ["lazybm"]),
+        .executable(name: "Swiftmarks", targets: ["Swiftmarks"]),
         .library(name: "LazyBookmarksKit", targets: ["LazyBookmarksKit"]),
         .library(name: "EvalKit", targets: ["EvalKit"]),
     ],
@@ -42,6 +43,14 @@ let package = Package(
                 .linkedFramework("NaturalLanguage"),
                 .linkedFramework("FoundationModels"),
             ]
+        ),
+        // SwiftUI demo shell. Deliberately a SwiftPM executable rather than an
+        // Xcode app project: it runs unsandboxed via `swift run`, which is what
+        // lets it read another browser's profile without entitlements.
+        .executableTarget(
+            name: "Swiftmarks",
+            dependencies: ["LazyBookmarksKit"],
+            path: "Sources/Swiftmarks"
         ),
         .target(
             name: "EvalKit",

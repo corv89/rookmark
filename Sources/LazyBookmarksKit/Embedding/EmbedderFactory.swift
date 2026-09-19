@@ -28,9 +28,9 @@ public enum EmbedderFactory {
 
     /// Creates an embedder synchronously.
     ///
-    /// - `preferred == .sentence`: returns sentence embedder (or nil if unavailable)
     /// - `preferred == .contextual`: returns contextual embedder (or nil if unavailable)
-    public static func make(preferred: Preference = .sentence) -> BookmarkEmbedder? {
+    /// - `preferred == .sentence`: returns sentence embedder (or nil if unavailable)
+    public static func make(preferred: Preference = .contextual) -> BookmarkEmbedder? {
         switch preferred {
         case .contextual:
             return ContextualEmbedder()
@@ -40,12 +40,32 @@ public enum EmbedderFactory {
     }
 
     /// Async variant. Returns nil if no embedder is available.
-    public static func makeAsync(preferred: Preference = .sentence) async -> BookmarkEmbedder? {
+    public static func makeAsync(preferred: Preference = .contextual) async -> BookmarkEmbedder? {
         switch preferred {
         case .contextual:
             return ContextualEmbedder()
         case .sentence:
             return SentenceEmbedder()
+        }
+    }
+
+    /// Whether the contextual embedding assets are available for the given script.
+    public static func hasContextualAssets(for script: NLScript = .latin) -> Bool {
+        guard let emb = NLContextualEmbedding(script: script) else { return false }
+        return emb.hasAvailableAssets
+    }
+
+    /// Request contextual embedding asset download. Calls back with success.
+    public static func requestContextualAssets(
+        for script: NLScript = .latin,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        guard let emb = NLContextualEmbedding(script: script) else {
+            completion(false)
+            return
+        }
+        emb.requestAssets { _, error in
+            completion(error == nil && emb.hasAvailableAssets)
         }
     }
 }

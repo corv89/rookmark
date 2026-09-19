@@ -23,7 +23,9 @@ struct Doctor: AsyncParsableCommand {
         }
 
         // Report embedder status
-        if let embedder = EmbedderFactory.make() {
+        // If downloading assets, explicitly request contextual; otherwise prefer sentence
+        let preferredEmbedder: EmbedderFactory.Preference = downloadAssets ? .contextual : .sentence
+        if let embedder = EmbedderFactory.make(preferred: preferredEmbedder) {
             let family = embedder.modelID.hasPrefix("contextual") ? "contextual" : "sentence"
             print("\nEmbedding:")
             print("  Backend:  \(family)")

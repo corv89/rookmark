@@ -12,8 +12,6 @@ DerivedData/
 *.db-shm
 *.db-wal
 *.organized.html
-worksheet.csv
-sample.stderr
 *.labels.db
 
 *.heapsnapshot
@@ -21,7 +19,16 @@ sample.stderr
 *.network-response
 
 .DS_Store
-test_small.html
-test_small.organized.html
-labels-to-import.csv
-labels-unix.csv
+
+# Scratch/disposable tuning output: logs, stderr dumps, superseded
+# worksheet & taxonomy iterations, regenerated DBs.
+/experiments/
+
+# Real people's bookmark collections and the labeled worksheets derived from
+# them. These contain actual URLs, page titles and browsing interests
+# belonging to identifiable individuals. They stay on local disk and are
+# never committed. Taxonomy JSON (folder names + rationales only) is fine.
+/corpora/
+/tuning/*.csv
+/tuning/*.numbers
+/tuning/run-data/

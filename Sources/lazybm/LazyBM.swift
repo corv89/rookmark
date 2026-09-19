@@ -11,11 +11,13 @@ struct LazyBM: AsyncParsableCommand {
             Dedup.self,
             CheckLinks.self,
             ImportCmd.self,
+            ImportOrion.self,
             ExportCmd.self,
             ListCmd.self,
             SearchCmd.self,
             Undo.self,
             Status.self,
+            Worksheet.self,
             Eval.self,
         ],
         defaultSubcommand: Organize.self

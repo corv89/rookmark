@@ -78,6 +78,16 @@ public struct Store: Sendable {
             try db.execute(sql: "ALTER TABLE runs ADD COLUMN summary_json TEXT")
         }
 
+        migrator.registerMigration("v4") { db in
+            try db.create(table: "enrichments", ifNotExists: true) { t in
+                t.primaryKey("bookmark_id", .text).references("bookmarks", onDelete: .cascade)
+                t.column("meta_description", .text)
+                t.column("is_dead_link", .boolean).notNull().defaults(to: false)
+                t.column("http_status", .integer)
+                t.column("fetched_at", .datetime).notNull()
+            }
+        }
+
         try migrator.migrate(dbQueue)
     }
 
@@ -316,7 +326,70 @@ public struct Store: Sendable {
         }
     }
 
+    // MARK: - Enrichments
+
+    public func getEnrichment(bookmarkID: String) throws -> Enrichment? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM enrichments WHERE bookmark_id = ?
+            """, arguments: [bookmarkID]) else { return nil }
+            return Self.enrichmentFromRow(row)
+        }
+    }
+
+    public func getEnrichments(bookmarkIDs: Set<String>) throws -> [String: Enrichment] {
+        guard !bookmarkIDs.isEmpty else { return [:] }
+        return try dbQueue.read { db in
+            let placeholders = bookmarkIDs.map { _ in "?" }.joined(separator: ",")
+            let sql = """
+                SELECT * FROM enrichments WHERE bookmark_id IN (\(placeholders))
+            """
+            let args = StatementArguments(bookmarkIDs.map { $0 as DatabaseValueConvertible })!
+            let rows = try Row.fetchAll(db, sql: sql, arguments: args)
+            var result: [String: Enrichment] = [:]
+            for row in rows {
+                let e = Self.enrichmentFromRow(row)
+                result[e.bookmarkID] = e
+            }
+            return result
+        }
+    }
+
+    public func setEnrichment(_ enrichment: Enrichment) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                INSERT OR REPLACE INTO enrichments (bookmark_id, meta_description, is_dead_link, http_status, fetched_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    enrichment.bookmarkID,
+                    enrichment.metaDescription,
+                    enrichment.isDeadLink,
+                    enrichment.httpStatus,
+                    enrichment.fetchedAt,
+                ]
+            )
+        }
+    }
+
+    public func clearEnrichments() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM enrichments")
+        }
+    }
+
     // MARK: - Helpers
+
+    private static func enrichmentFromRow(_ row: Row) -> Enrichment {
+        Enrichment(
+            bookmarkID: row["bookmark_id"],
+            metaDescription: row["meta_description"],
+            isDeadLink: row["is_dead_link"],
+            httpStatus: row["http_status"],
+            fetchedAt: row["fetched_at"]
+        )
+    }
 
     private static func bookmarkFromRow(_ row: Row) -> Bookmark {
         let pathJSON: String? = row["original_path_json"]

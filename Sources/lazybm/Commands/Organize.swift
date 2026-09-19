@@ -34,8 +34,8 @@ struct Organize: AsyncParsableCommand {
     @Option(help: "Taxonomy mode: 'preserve', 'fresh', or 'cluster'.")
     var taxonomy: String = "preserve"
 
-    @Option(name: .customLong("embedder"), help: "Embedding backend: 'sentence' (default, fast) or 'contextual' (multilingual, transformer; requires 'lazybm doctor --download-assets').")
-    var embedder: String = "sentence"
+    @Option(name: .customLong("embedder"), help: "Embedding backend: 'contextual' (default, multilingual, transformer) or 'sentence' (fast, English-only).")
+    var embedder: String = "contextual"
 
     @Option(name: .customLong("cluster-threshold"), help: "Cosine similarity threshold (0-1) for grouping bookmarks into clusters. Use -1 for auto (per-embedder defaults).")
     var clusterThreshold: Double = -1
@@ -52,6 +52,12 @@ struct Organize: AsyncParsableCommand {
     @Option(name: .customLong("taxonomy-from"), help: "Load taxonomy from a JSON file (format: {\"v\":2,\"folders\":[...]}).")
     var taxonomyFrom: String?
 
+    @Flag(name: .customLong("no-enrich"), help: "Skip content enrichment (meta description fetching).")
+    var noEnrich = false
+
+    @Flag(name: .customLong("refresh-enrichments"), help: "Re-fetch meta descriptions even if cached.")
+    var refreshEnrichments = false
+
     func run() async throws {
         let factory = SessionFactory()
         guard case .available = factory.availability() else {
@@ -67,12 +73,39 @@ struct Organize: AsyncParsableCommand {
             default: return .preserve
             }
         }()
-        let embedderPref: EmbedderFactory.Preference = {
+        var embedderPref: EmbedderFactory.Preference = {
             switch embedder {
-            case "contextual": return .contextual
-            default: return .sentence
+            case "sentence": return .sentence
+            default: return .contextual
             }
         }()
+
+        if embedderPref == .contextual && !EmbedderFactory.hasContextualAssets() {
+            FileHandle.standardError.write(Data(
+                "Contextual embedding model not downloaded. Download now? (Y/N) [~500MB] ".utf8
+            ))
+            let answer = readLine()?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            if answer == "y" || answer == "yes" {
+                FileHandle.standardError.write(Data("Downloading contextual model…\n".utf8))
+                let success = await withCheckedContinuation { continuation in
+                    EmbedderFactory.requestContextualAssets { ok in
+                        continuation.resume(returning: ok)
+                    }
+                }
+                if !success {
+                    FileHandle.standardError.write(Data(
+                        "warning: contextual model download failed; falling back to sentence embeddings\n".utf8
+                    ))
+                    embedderPref = .sentence
+                }
+            } else {
+                FileHandle.standardError.write(Data(
+                    "warning: contextual model not available; falling back to sentence embeddings\n".utf8
+                ))
+                embedderPref = .sentence
+            }
+        }
+
         let clusteringConfig = ClusteringConfig(
             enabled: cluster,
             similarityThreshold: clusterThreshold,
@@ -113,7 +146,9 @@ struct Organize: AsyncParsableCommand {
             sourcePath: input,
             clustering: clusteringConfig,
             embedderPreference: embedderPref,
-            pinnedTaxonomy: pinned
+            pinnedTaxonomy: pinned,
+            enrich: !noEnrich,
+            refreshEnrichments: refreshEnrichments
         )
 
         final class ProgressState: @unchecked Sendable {
@@ -131,9 +166,21 @@ struct Organize: AsyncParsableCommand {
         let state = ProgressState()
         let result: Organizer.Result
         do {
-            result = try await organizer.organize(html: html, options: opts) { done, total in
-                state.update("Classifying \(done)/\(total)…")
-            }
+            result = try await organizer.organize(
+                html: html,
+                options: opts,
+                enrichmentProgress: { done, total in
+                    state.update("Enriching \(done)/\(total)…")
+                },
+                onDeadLink: { title, url, reason in
+                    FileHandle.standardError.write(Data(
+                        "\n⚠️  Dead link: \"\(title)\" - \(url) (\(reason))\n".utf8
+                    ))
+                },
+                progress: { done, total in
+                    state.update("Classifying \(done)/\(total)…")
+                }
+            )
         } catch Organizer.Error.contextualEmbedderUnavailable {
             throw ValidationError("Contextual embedder not available. Run: lazybm doctor --download-assets")
         }
@@ -141,6 +188,15 @@ struct Organize: AsyncParsableCommand {
         let out = output ?? (input as NSString).deletingPathExtension + ".organized.html"
         let rendered = NetscapeBookmarkWriter().write(result.bookmarks)
         try rendered.write(toFile: out, atomically: true, encoding: .utf8)
+
+        if !noEnrich {
+            let deadCount = result.deadLinks.count
+            if deadCount > 0 {
+                FileHandle.standardError.write(Data(
+                    "\n✅ Enriched \(result.bookmarks.count) bookmarks (\(deadCount) dead link\(deadCount == 1 ? "" : "s") detected)\n".utf8
+                ))
+            }
+        }
 
         let placed = result.bookmarks.filter { ($0.assignedFolder ?? Taxonomy.unsorted) != Taxonomy.unsorted }.count
         print("\nSorted \(placed)/\(result.bookmarks.count) bookmarks into \(result.taxonomy.folders.count) folders.")

@@ -23,6 +23,9 @@ public struct Organizer: Sendable {
         public var constrainedFolderCap: Int
         public var embedderPreference: EmbedderFactory.Preference
         public var pinnedTaxonomy: Taxonomy?
+        public var enrich: Bool
+        public var refreshEnrichments: Bool
+        public var enrichmentConfig: ContentEnricher.Config
         public init(
             taxonomyMode: TaxonomyBuilder.Mode = .preserve,
             classifier: Classifier.Config = .init(),
@@ -31,8 +34,11 @@ public struct Organizer: Sendable {
             sourcePath: String? = nil,
             clustering: ClusteringConfig = .init(),
             constrainedFolderCap: Int = 40,
-            embedderPreference: EmbedderFactory.Preference = .sentence,
-            pinnedTaxonomy: Taxonomy? = nil
+            embedderPreference: EmbedderFactory.Preference = .contextual,
+            pinnedTaxonomy: Taxonomy? = nil,
+            enrich: Bool = true,
+            refreshEnrichments: Bool = false,
+            enrichmentConfig: ContentEnricher.Config = .init()
         ) {
             self.taxonomyMode = taxonomyMode
             self.classifier = classifier
@@ -43,6 +49,9 @@ public struct Organizer: Sendable {
             self.constrainedFolderCap = constrainedFolderCap
             self.embedderPreference = embedderPreference
             self.pinnedTaxonomy = pinnedTaxonomy
+            self.enrich = enrich
+            self.refreshEnrichments = refreshEnrichments
+            self.enrichmentConfig = enrichmentConfig
         }
     }
 
@@ -50,6 +59,12 @@ public struct Organizer: Sendable {
         public var bookmarks: [Bookmark]   // with assignedFolder/confidence filled
         public var taxonomy: Taxonomy
         public var unsortedCauses: Classifier.UnsortedCauses
+        public var deadLinks: [(title: String, url: String, reason: String)]
+        public var enrichmentCount: Int
+        /// Per-item decisions, including `modelChosenFolder` — the folder the model
+        /// picked before the confidence floor or validation could override it. A UI
+        /// needs this to explain *why* something landed in Unsorted.
+        public var decisions: [Classifier.Decision]
     }
 
     private let factory: SessionFactory
@@ -65,9 +80,14 @@ public struct Organizer: Sendable {
         case contextualEmbedderUnavailable
     }
 
+    public typealias EnrichmentProgressHandler = @Sendable (_ done: Int, _ total: Int) -> Void
+    public typealias DeadLinkHandler = @Sendable (_ title: String, _ url: String, _ reason: String) -> Void
+
     public func organize(
         html: String,
         options: Options,
+        enrichmentProgress: EnrichmentProgressHandler? = nil,
+        onDeadLink: DeadLinkHandler? = nil,
         progress: Classifier.ProgressHandler? = nil
     ) async throws -> Result {
         guard case .available = factory.availability() else {
@@ -107,8 +127,32 @@ public struct Organizer: Sendable {
             store = nil
         }
 
-        let classifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
-        var decisions = await classifier.classify(parse.bookmarks, taxonomy: taxonomy, progress: progress)
+        var enrichments: [String: ContentEnricher.EnrichResult]?
+        var deadLinkList: [(title: String, url: String, reason: String)] = []
+        var enrichmentCount = 0
+        if options.enrich {
+            let enricher = ContentEnricher(config: options.enrichmentConfig, store: store)
+            let results = await enricher.enrich(
+                parse.bookmarks,
+                refresh: options.refreshEnrichments,
+                progress: enrichmentProgress,
+                onDeadLink: onDeadLink
+            )
+            enrichments = results
+            deadLinkList = await enricher.getDeadLinks()
+            enrichmentCount = results.filter { $0.value.metaDescription != nil }.count
+        }
+
+        var classifierConfig = options.classifier
+        if options.enrich && enrichments != nil {
+            let enrichedCount = enrichments?.filter { $0.value.metaDescription != nil }.count ?? 0
+            if enrichedCount > 0 {
+                classifierConfig.initialBatchSize = min(classifierConfig.initialBatchSize, 4)
+            }
+        }
+
+        let classifier = Classifier(factory: factory, config: classifierConfig, budget: budget, taxonomy: taxonomy)
+        var decisions = await classifier.classify(parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments, progress: progress)
 
 
         if options.clustering.enabled {
@@ -222,6 +266,13 @@ public struct Organizer: Sendable {
             )
         }
 
-        return Result(bookmarks: bookmarks, taxonomy: taxonomy, unsortedCauses: finalCauses)
+        return Result(
+            bookmarks: bookmarks,
+            taxonomy: taxonomy,
+            unsortedCauses: finalCauses,
+            deadLinks: deadLinkList,
+            enrichmentCount: enrichmentCount,
+            decisions: decisions
+        )
     }
 }

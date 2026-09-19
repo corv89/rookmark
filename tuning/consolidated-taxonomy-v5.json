@@ -1,0 +1,93 @@
+{
+  "v": 2,
+  "folders": [
+    {
+      "name": "Development",
+      "rationale": "Programming languages, frameworks, libraries, code repositories, software engineering education, APIs, IDEs, build tools, version control, and general-purpose coding. Application-level code and developer workflow tooling. NOT security/pentesting tools, hardware programming, or embedded firmware."
+    },
+    {
+      "name": "Hardware & Devices",
+      "rationale": "Physical computing devices and components: servers, networking gear, single-board computers (Raspberry Pi), GPS trackers, smart home devices, cameras, keyboards, peripherals, and PCB prototyping supplies. Tangible hardware you can touch. NOT embedded firmware or microcontroller programming (use Embedded Systems & Electronics)."
+    },
+    {
+      "name": "Embedded Systems & Electronics",
+      "rationale": "Microcontrollers (AVR, ARM, Xmega, PIC, ESP32), embedded firmware, circuit design, schematics, PCB layout (KiCad, Eagle), electronic components (resistors, capacitors, transistors, ICs, crystals), signal processing, soldering, datasheets, and electronics tutorials. Low-level hardware programming and analog/digital circuit design, not finished consumer devices or application-level software."
+    },
+    {
+      "name": "Web Services & Infrastructure",
+      "rationale": "Cloud platforms (AWS, GCP, Azure), hosting providers, DNS, SSL/TLS certificates, monitoring and observability (Prometheus, Grafana), SaaS productivity tools, web-based utilities, CI/CD pipelines, container orchestration, and infrastructure-as-code. Hosted services accessed via API or browser. NOT self-hosted media servers, security scanners, or local network configuration."
+    },
+    {
+      "name": "Design & UX",
+      "rationale": "Fonts, icons, CSS frameworks, color palettes, design tools, visual design inspiration, UI/UX patterns, and graphic design resources. Visual styling and aesthetics, not Turing-complete code, hosted services, or cultural commentary."
+    },
+    {
+      "name": "Linux & Systems",
+      "rationale": "Linux distributions, containers, Kubernetes, image-mode deployments, boot systems (GRUB, UEFI), macOS system tools, OS-level infrastructure, shell scripting, system administration, and package management. Operating systems and system configuration, not application code or physical devices."
+    },
+    {
+      "name": "AI & ML",
+      "rationale": "Machine learning models, LLMs, generative AI, local inference, AI benchmarks, neural network research, speech recognition, NLP, computer vision, and AI-specific tooling. ML/AI research and model training/inference specifically, not cybersecurity tools, general programming, or SaaS products that happen to use AI."
+    },
+    {
+      "name": "Privacy & Security",
+      "rationale": "Cybersecurity: penetration testing tools and frameworks (Metasploit, Burp Suite, nmap, nuclei), vulnerability databases (CVE, Exploit DB), bug bounty platforms (HackerOne, Bugcrowd), red team/blue team resources, OPSEC guides, privacy tools and practices (VPNs, Tor, encryption), security news and research, malware analysis, reverse engineering, OSINT, threat intelligence, and anonymity resources. Offensive and defensive security, not general programming or business risk management."
+    },
+    {
+      "name": "Crypto & Finance",
+      "rationale": "Bitcoin, Lightning Network, Ordinals, self-custody wallets, trading, prediction markets, DeFi protocols, investment research, startup funding, financial industry, on-chain analysis, and cryptocurrency exchanges. Money, trading, and decentralized finance, not cybersecurity or physical devices."
+    },
+    {
+      "name": "EV & Transportation",
+      "rationale": "Electric vehicles: e-bikes, e-scooters, e-motorcycles, EV manufacturers, charging infrastructure, batteries, renewable energy, transportation data. Vehicles and transport, not general electronics or travel lifestyle."
+    },
+    {
+      "name": "Maker & Fabrication",
+      "rationale": "3D printing, filaments, printer upgrades, CNC tools, laser cutting, hardware prototyping, maker retail, and DIY fabrication projects. Making physical objects, not finished commercial devices or software."
+    },
+    {
+      "name": "Business & Marketing",
+      "rationale": "SEO tools, marketing agencies, growth tactics, social outreach automation, business strategy, content marketing, commerce APIs, analytics platforms, and startup operations. Running and promoting a business, not investment, retail, or cloud services."
+    },
+    {
+      "name": "Legal & Policy",
+      "rationale": "Legal resources, contracts, terms-of-service analysis, consumer rights, trademark and patent resources, regulatory compliance, government policy, and civil liberties. Law and compliance, not financial markets or business strategy."
+    },
+    {
+      "name": "Health & Wellness",
+      "rationale": "Physical and mental health, psychology, wellness practices, health research, air quality, pharmaceutical standards, nutrition, and medical devices. Personal health and wellbeing, not cultural commentary or structured courses."
+    },
+    {
+      "name": "Travel & Living",
+      "rationale": "Travel planning, destinations, nomad and expat guides, real estate, food and cooking recipes, restaurant guides, lifestyle content, and relocation resources. Destinations and lifestyle, not vehicle infrastructure or retail shopping."
+    },
+    {
+      "name": "Culture & Media",
+      "rationale": "Entertainment, music, film, visual and literary arts, history, cultural commentary, music archives, philosophy, podcasts, and streaming platforms for original content. Content to consume or humanities, not piracy/file-sharing tools, journalism, or structured learning."
+    },
+    {
+      "name": "Media & File Sharing",
+      "rationale": "Torrent trackers and indexers, Usenet indexers and providers, media management servers (SABnzbd, Sonarr, Radarr, Lidarr, Prowlarr, Jellyfin, Plex), subtitle download sites, streaming/piracy aggregators, seedboxes, file hosting services, and download managers. Tools and platforms for acquiring and serving media files, not the media content itself or original-content streaming platforms."
+    },
+    {
+      "name": "Social & Communication",
+      "rationale": "Social networks, forums, discussion sites, messaging platforms, community sites, and chat services. User-generated social interaction, not professional journalism, content consumption, or productivity tools."
+    },
+    {
+      "name": "Shopping & Commerce",
+      "rationale": "Online stores, marketplaces, e-commerce sites, product pages, retail platforms, and price comparison sites. Purchasing goods directly, not business strategy, technical resources, or lifestyle experiences."
+    },
+    {
+      "name": "News & Publications",
+      "rationale": "Journalism, news outlets, magazines, editorial content, opinion pieces, current affairs reporting, and investigative journalism. Professional reporting and editorial, not entertainment or user-generated discussion."
+    },
+    {
+      "name": "Education & Learning",
+      "rationale": "Online courses, tutorials, educational platforms, how-to guides, textbooks, structured learning content, academic resources, and certification prep. Teaching and instruction, not development tools, cultural content, or reporting."
+    },
+    {
+      "name": "Search & Reference",
+      "rationale": "Search engines, encyclopedias, lookup tools, index services, dictionaries, and general reference homepages. General reference and search, not articles found via search, structured learning, or content to consume."
+    }
+  ]
+}

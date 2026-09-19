@@ -96,4 +96,46 @@ struct ClassifierTests {
         #expect(d.modelChosenFolder == "Cooking")
         #expect(d.confidence == 8)
     }
+
+    @Test("renderPrompt includes meta descriptions when enrichments provided")
+    func renderPromptWithEnrichments() {
+        let bookmarks = [
+            Bookmark(id: "abc", title: "Swift Lang", url: "https://swift.org/docs"),
+            Bookmark(id: "def", title: "BBC News", url: "https://bbc.co.uk/news"),
+        ]
+        let enrichments: [String: ContentEnricher.EnrichResult] = [
+            "abc": .init(bookmarkID: "abc", metaDescription: "Official Swift documentation", isDeadLink: false),
+            "def": .init(bookmarkID: "def", metaDescription: "British Broadcasting Corporation news", isDeadLink: false),
+        ]
+        let folderBlock = Classifier.renderFolders(Self.taxonomy)
+        let prompt = Classifier.renderPrompt(bookmarks, folderBlock: folderBlock, enrichments: enrichments)
+        #expect(prompt.contains("b0 | Swift Lang | https://swift.org/docs | Official Swift documentation"))
+        #expect(prompt.contains("b1 | BBC News | https://bbc.co.uk/news | British Broadcasting Corporation news"))
+    }
+
+    @Test("renderPrompt omits description when enrichment is nil")
+    func renderPromptWithoutEnrichments() {
+        let bookmarks = [
+            Bookmark(id: "abc", title: "Swift Lang", url: "https://swift.org/docs"),
+        ]
+        let folderBlock = Classifier.renderFolders(Self.taxonomy)
+        let prompt = Classifier.renderPrompt(bookmarks, folderBlock: folderBlock, enrichments: nil)
+        #expect(prompt.contains("b0 | Swift Lang | https://swift.org/docs"))
+        #expect(!prompt.contains(" | Official"))
+    }
+
+    @Test("renderPrompt skips description when meta is nil for that bookmark")
+    func renderPromptPartialEnrichments() {
+        let bookmarks = [
+            Bookmark(id: "abc", title: "Swift Lang", url: "https://swift.org/docs"),
+            Bookmark(id: "def", title: "BBC News", url: "https://bbc.co.uk/news"),
+        ]
+        let enrichments: [String: ContentEnricher.EnrichResult] = [
+            "abc": .init(bookmarkID: "abc", metaDescription: "Swift docs", isDeadLink: false),
+        ]
+        let folderBlock = Classifier.renderFolders(Self.taxonomy)
+        let prompt = Classifier.renderPrompt(bookmarks, folderBlock: folderBlock, enrichments: enrichments)
+        #expect(prompt.contains("b0 | Swift Lang | https://swift.org/docs | Swift docs"))
+        #expect(prompt.contains("b1 | BBC News | https://bbc.co.uk/news\n") || prompt.hasSuffix("b1 | BBC News | https://bbc.co.uk/news"))
+    }
 }
