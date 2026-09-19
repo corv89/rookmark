@@ -119,27 +119,38 @@ On 720 hand-labeled placements from a real collection:
 | Placement precision (accepted / placed) | 84.0% |
 | Effective yield (accepted / total) | 81.4% |
 
-Throughput is roughly 1.1 seconds per bookmark on an M4 Max. The on-device model
-is a single serialized resource, so this is mostly independent of which Apple
-Silicon chip you have; the Neural Engine is the same across the M4 line.
+Throughput is roughly 1.1 seconds per bookmark on an M4. The Neural Engine is
+the same across the M4 line, regardless of which variant you have.
 
-These numbers come from one person's collection and are provisional. See
+These figures come from one person's collection and are provisional. See
 `docs/EVALUATION.md` for the methodology and `docs/TUNING.md` for the tuning
 runbook. The `eval` subcommand reproduces all of it.
 
 ## What it will not do
 
-- **It never modifies your browser.** Output is always a new file that you
+- **It does not edit your existing bookmarks!** Output is always a new file that you
   choose to import manually, once you're satisfied with the proposed structure.
 - **It never sends your bookmarks anywhere.** Classification and embedding both
   run on-device. Optional page-description fetching and liveness checks are the
-  only features that touch the network, and they're off by default.
+  only features that touch the network, and they're off unless you say otherwise.
 
 ## Known limitations
 
-- Safari's bookmarks are unreadable without Full Disk Access; export from Safari
-  and open the file instead. Chrome and Firefox importers are not written yet.
-- The taxonomy is flat. We don't generate nested folders.
+- Safari's bookmarks are unreadable without Full Disk Access; please export manually
+  from Safari and open the file instead. Chrome and Firefox importers are not available yet.
+- The taxonomy is flat. Rookmark won't create nested folder structures.
+
+## Contributing
+
+If you'd like to help improve accuracy and taxonomy, open an issue, or get in
+touch if you're willing to share your own bookmark collection (handled
+respectfully and never redistributed).
+
+## Credits
+
+Shoutout to [LLMCoolJ](https://github.com/LLMCoolJ/) for the [Lazybookmarks](https://github.com/LLMCoolJ/lazybookmarks) prototype!
+
+Special thanks to Anthropic for the Fable 5.1 Build Day hackathon which brought about this GUI.
 
 ## License
 
