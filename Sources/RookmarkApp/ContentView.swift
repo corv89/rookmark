@@ -73,6 +73,19 @@ struct ContentView: View {
         } message: { _ in
             Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
         }
+        .confirmationDialog(
+            "Replace the run on screen?",
+            isPresented: Binding(
+                get: { model.pendingOrionProfile },
+                set: { if !$0 { model.cancelOrionProfile() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Use the Orion profile", role: .destructive) { model.confirmOrionProfile() }
+            Button("Cancel", role: .cancel) { model.cancelOrionProfile() }
+        } message: {
+            Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
+        }
         .onChange(of: model.source) { _, _ in
             // The footer path belongs to the previous source's export. Cleared even
             // when a failed import rolls the source straight back: the label is
@@ -99,6 +112,22 @@ struct ContentView: View {
             .keyboardShortcut("o", modifiers: .command)
             .disabled(model.isBusy)
             .help("Load any browser's bookmarks export (.html or .htm). The file is only read, never modified.")
+        }
+
+        ToolbarItem {
+            // Hidden when the profile is missing or already loaded; the button would
+            // otherwise be a dead control. defaultFavouritesURL is one stat call when
+            // the profile exists, so evaluating it in the toolbar is cheap.
+            if OrionImporter.defaultFavouritesURL() != nil, model.source != .orionProfile {
+                Button {
+                    model.requestOrionProfile()
+                } label: {
+                    Label("Use Orion profile", systemImage: "arrow.uturn.backward")
+                        .labelStyle(.titleAndIcon)
+                }
+                .disabled(model.isBusy)
+                .help("Go back to the bookmarks in the installed Orion profile, without relaunching.")
+            }
         }
 
         ToolbarItem {

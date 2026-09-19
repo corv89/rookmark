@@ -139,6 +139,10 @@ final class OrganizerModel {
     /// taking over the whole detail view (`.failed` is reserved for failures with
     /// nothing to protect). Cleared by `dismissImportFailure()`.
     private(set) var importFailureMessage: String?
+    /// An Orion switch waiting on the replace confirmation, mirroring
+    /// `pendingImport` for the profile path. Non-nil drives the dialog; the load
+    /// has not started.
+    private(set) var pendingOrionProfile = false
     /// On-device model availability, re-read at scan time and on every app
     /// activation. Never latch a result: Apple Intelligence can be turned on
     /// while Rookmark is running.
@@ -277,6 +281,29 @@ final class OrganizerModel {
     }
 
     func dismissImportFailure() { importFailureMessage = nil }
+
+    /// The toolbar's way back to the Orion library, so leaving an imported file
+    /// never needs a relaunch. Guards mirror requestImport(from:): nothing during
+    /// a run, and a run on screen is replaced only after confirmation.
+    func requestOrionProfile() {
+        guard !isBusy else { return }
+        guard case .orionProfile = source else {
+            if rows.isEmpty {
+                Task { await load(.orionProfile, discardingSession: false) }
+            } else {
+                pendingOrionProfile = true
+            }
+            return
+        }
+    }
+
+    func confirmOrionProfile() {
+        guard pendingOrionProfile else { return }
+        pendingOrionProfile = false
+        Task { await load(.orionProfile, discardingSession: true) }
+    }
+
+    func cancelOrionProfile() { pendingOrionProfile = false }
 
     // State-update halves split out so tests can drive the import gate without a
     // real load: drag-and-drop and NSOpenPanel cannot run in CI, and neither can
