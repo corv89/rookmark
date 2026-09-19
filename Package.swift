@@ -51,7 +51,8 @@ let package = Package(
         .executableTarget(
             name: "RookmarkApp",
             dependencies: ["RookmarkKit"],
-            path: "Sources/RookmarkApp"
+            path: "Sources/RookmarkApp",
+            resources: [.process("Resources")]
         ),
         .target(
             name: "EvalKit",

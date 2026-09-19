@@ -36,3 +36,9 @@ DerivedData/
 # UI reference screenshots of other apps. Kept locally: ~18MB of binaries
 # that would live in history forever, and they aren't ours to redistribute.
 /design/
+
+# Intermediate iconset; regenerate with scripts/make-icon.py
+/icon/*.iconset/
+
+# Built .app bundles
+/build/

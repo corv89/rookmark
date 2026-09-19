@@ -47,6 +47,14 @@ work.
 ### Graphical
 
 ```
+./scripts/make-app.sh      # builds build/Rookmark.app
+open build/Rookmark.app
+```
+
+Or run it straight from the package during development, which skips the bundle
+and therefore shows up as `RookmarkApp` rather than `Rookmark`:
+
+```
 swift run -c release RookmarkApp
 ```
 
