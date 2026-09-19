@@ -1,20 +1,29 @@
-# Rookmark
+<p align="center">
+  <img src="media/icon.png" width="128" height="128" alt="Rookmark icon">
+</p>
 
-Sorts a pile of browser bookmarks into sensible topic folders, using the
-on-device language model built into macOS. Nothing is uploaded, nothing is
-deleted, and no account is required.
+<h1 align="center">Rookmark</h1>
+
+<p align="center">
+  Sorts a pile of browser bookmarks into sensible topic folders, using the
+  on-device language model built into macOS.<br>
+  Nothing is uploaded, nothing is deleted, and no account is required.
+</p>
 
 _Rooks cache things and remember where they put them, that's why!_
 
 ## Problem & Solution
 
 If you're anything like me, you keep finding interesting content around the web
-but never take the time to organize it properly. Or, a botched browser migration 
+but never take the time to organize it properly. Or, a botched browser migration
 wipes what you've painstakingly organized by hand.
 
 Rookmark sorts your pile of bookmarks automatically and proposes a new home for
 each one, without exposing any of your content.
 
+<p align="center">
+  <img src="media/screenshot.png" width="800" alt="Rookmark reviewing a live classification run: a sidebar of folders with counts, a table of bookmarks sorted least-confident-first, and a run-progress card">
+</p>
 
 ## Requirements
 
@@ -123,8 +132,8 @@ runbook. The `eval` subcommand reproduces all of it.
 - **It never modifies your browser.** Output is always a new file that you
   choose to import manually, once you're satisfied with the proposed structure.
 - **It never sends your bookmarks anywhere.** Classification and embedding both
-  run on-device. Optional page-description fetching and liveness checks are the only feature that
-  touch the network, and they're off by default.
+  run on-device. Optional page-description fetching and liveness checks are the
+  only features that touch the network, and they're off by default.
 
 ## Known limitations
 
