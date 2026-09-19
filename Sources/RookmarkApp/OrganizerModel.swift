@@ -852,6 +852,17 @@ final class OrganizerModel {
     func updateFolder(_ name: String, to newName: String, rationale: String) throws {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw TaxonomyEditError.emptyName }
+        // Both ends of the rename are guarded. The clash scan below cannot
+        // catch a rename INTO the sentinel — the working list never contains
+        // it, so nothing canonically "unsorted" can clash — yet such a rename
+        // would shadow it: allowedFolderNames appends its own "Unsorted" (the
+        // model would see the folder twice), the classifier short-circuits
+        // canonical-unsorted answers back to that spelling, and the impostor
+        // could then never be removed because delete/rename/merge all refuse
+        // to touch anything canonically Unsorted.
+        guard Self.canonicalFolderName(trimmed) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
         guard Self.canonicalFolderName(name) != Self.canonicalFolderName(Taxonomy.unsorted) else {
             throw TaxonomyEditError.protectedFolder
         }
@@ -916,15 +927,19 @@ final class OrganizerModel {
 
     /// Moves every row of `source` into `target`, then removes `source`.
     func mergeFolder(_ source: String, into target: String) throws {
+        // Sentinel first, and canonically: the working list never contains the
+        // sentinel, so an existence check alone would misreport a merge into a
+        // respelled "unsorted" as unknownFolder and, worse, read as a lookup
+        // bug rather than a protection.
+        guard Self.canonicalFolderName(source) != Self.canonicalFolderName(Taxonomy.unsorted),
+              Self.canonicalFolderName(target) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
         guard workingFolders.contains(where: { $0.name == source }),
               workingFolders.contains(where: { $0.name == target }) else {
             throw TaxonomyEditError.unknownFolder
         }
         guard source != target else { throw TaxonomyEditError.sameFolder }
-        guard Self.canonicalFolderName(source) != Self.canonicalFolderName(Taxonomy.unsorted),
-              Self.canonicalFolderName(target) != Self.canonicalFolderName(Taxonomy.unsorted) else {
-            throw TaxonomyEditError.protectedFolder
-        }
 
         relabel(rowsIn: source, to: target)
         workingFolders.removeAll { $0.name == source }

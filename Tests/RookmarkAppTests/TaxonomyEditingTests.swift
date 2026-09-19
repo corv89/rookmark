@@ -177,6 +177,21 @@ struct TaxonomyEditingTests {
             == .protectedFolder)
         #expect(editError(model) { try model.addFolder(named: "unsorted", rationale: "") }
             == .protectedFolder)
+        // Renaming or merging INTO the sentinel is the same refusal, in any
+        // canonical spelling: the working list never contains "Unsorted", so a
+        // clash scan cannot catch it — but a shadow entry would be stuck
+        // (delete/rename/merge all refuse it) and would hand the classifier's
+        // allowed list a second Unsorted.
+        #expect(editError(model) { try model.updateFolder("Development", to: "Unsorted", rationale: "") }
+            == .protectedFolder)
+        #expect(editError(model) { try model.updateFolder("Development", to: "  unsorted  ", rationale: "") }
+            == .protectedFolder)
+        #expect(editError(model) { try model.mergeFolder("Development", into: "UNSORTED") }
+            == .protectedFolder)
+        #expect(editError(model) { try model.mergeFolder("unsorted", into: "Development") }
+            == .protectedFolder)
+        // None of the rejected edits above may have touched the list.
+        #expect(model.workingFolders.map(\.name) == ["Development", "Reading"])
     }
 
     @Test("empty, unknown, and self-merge edits are rejected")
