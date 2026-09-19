@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 
+@testable import RookmarkApp
+
 /// `Sources/RookmarkApp/Resources/consolidated-taxonomy-v5.json` is a manual
 /// copy of `tuning/consolidated-taxonomy-v5.json`, and nothing in the build
 /// copies it. Editing tuning/ without re-copying therefore ships a stale
