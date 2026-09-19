@@ -31,7 +31,6 @@ struct ContentView: View {
                 Task { await model.organize() }
             } label: {
                 Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
-                    .padding(.horizontal, 4)
             }
             .buttonStyle(.glassProminent)
             .keyboardShortcut(.return)
@@ -85,8 +84,8 @@ struct ContentView: View {
                 .help("Write a new bookmarks file. Your browser is never modified.")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
     }
 
     @ViewBuilder
@@ -245,9 +244,10 @@ struct ContentView: View {
         let paused = { if case .paused = model.phase { return true } else { return false } }()
 
         if paused || stale != nil {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
+                    .imageScale(.small)
                 Text(statusMessage(paused: paused, stale: stale))
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
@@ -258,10 +258,10 @@ struct ContentView: View {
                         .help("Throw away this run and start over")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
             .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .capsule)
-            .padding(.top, 10)
+            .padding(.bottom, 10)
             .frame(maxWidth: 720)
         }
     }
