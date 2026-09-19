@@ -397,15 +397,47 @@ final class OrganizerModel {
 
     // MARK: - Taxonomy
 
-    /// Resolved relative to this source file: the app runs from the developer's
-    /// checkout via `swift run`. A shipping build would carry it as a resource.
-    private static func loadPinnedTaxonomy() throws -> Taxonomy {
+    /// Two-tier lookup, because the same binary has to work in the developer's
+    /// checkout and in a shipped Rookmark.app:
+    ///  1. the source tree, resolved relative to this file — during development
+    ///     the app runs via `swift run`, and reading `tuning/` directly means
+    ///     taxonomy edits apply without a rebuild;
+    ///  2. the copy bundled as a resource (`Resources/`) — the only copy that
+    ///     exists once the app leaves this machine. `make-app.sh` packs the
+    ///     SwiftPM resource bundle into the .app, so this resolves on any Mac.
+    /// Existence (not a decode attempt) decides the tier, so a corrupt
+    /// source-tree file surfaces as an error instead of silently loading a
+    /// stale bundled copy.
+    static func loadPinnedTaxonomy() throws -> Taxonomy {
         let repoRoot = URL(filePath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let url = repoRoot.appending(path: "tuning/consolidated-taxonomy-v5.json")
+        let sourceTree = repoRoot.appending(path: "tuning/consolidated-taxonomy-v5.json")
+
+        let url: URL
+        if FileManager.default.fileExists(atPath: sourceTree.path(percentEncoded: false)) {
+            url = sourceTree
+        } else if let bundled = Bundle.module.url(
+            forResource: "consolidated-taxonomy-v5", withExtension: "json"
+        ) {
+            url = bundled
+        } else {
+            throw TaxonomyNotFoundError(searched: [
+                sourceTree.path(percentEncoded: false),
+                Bundle.module.bundleURL.path(percentEncoded: false),
+            ])
+        }
         let envelope = try JSONDecoder().decode(TaxonomyEnvelope.self, from: try Data(contentsOf: url))
         return Taxonomy(folders: envelope.folders)
+    }
+
+    /// Surfaced through `Phase.failed`, so the message has to say where the app
+    /// looked — "no such file" alone would read as a bug with no lead.
+    private struct TaxonomyNotFoundError: Error, CustomStringConvertible {
+        let searched: [String]
+        var description: String {
+            "consolidated-taxonomy-v5.json not found; looked in: \(searched.joined(separator: ", "))"
+        }
     }
 }
