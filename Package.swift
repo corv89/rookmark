@@ -72,5 +72,10 @@ let package = Package(
             dependencies: ["EvalKit"],
             path: "Tests/EvalKitTests"
         ),
+        .testTarget(
+            name: "RookmarkAppTests",
+            dependencies: ["RookmarkApp"],
+            path: "Tests/RookmarkAppTests"
+        ),
     ]
 )

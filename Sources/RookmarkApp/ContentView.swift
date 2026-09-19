@@ -11,6 +11,7 @@ struct ContentView: View {
             header
             Divider()
             controls
+            statusBanner
             Divider()
             content
         }
@@ -54,6 +55,68 @@ struct ContentView: View {
         .padding(20)
     }
 
+    private var organizeTitle: String {
+        if case .paused = model.phase { return "Resume" }
+        return model.rows.isEmpty ? "Organize" : "Continue"
+    }
+
+    private func minutes(_ seconds: Double) -> String {
+        seconds < 90
+            ? "\(Int(seconds))s"
+            : "\(Int((seconds / 60).rounded())) min"
+    }
+
+    /// Says plainly when what is on screen is partial or no longer matches the
+    /// browser. A restored run looks identical to a finished one otherwise, which
+    /// is how people end up exporting half a library believing it was complete.
+    @ViewBuilder
+    private var statusBanner: some View {
+        let stale = model.staleness
+        let paused = { if case .paused = model.phase { return true } else { return false } }()
+
+        if paused || stale != nil {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(statusMessage(paused: paused, stale: stale))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if stale != nil {
+                    Button("Discard") { model.discardSession() }
+                        .help("Throw away this run and start over")
+                }
+            }
+            .font(.callout)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .background(.orange.opacity(0.12))
+        }
+    }
+
+    private func statusMessage(paused: Bool, stale: SessionStore.Staleness?) -> String {
+        var parts: [String] = []
+
+        if paused {
+            parts.append("Paused with \(model.remaining.count) of \(model.allBookmarks.count) still to classify.")
+        } else if let stale {
+            let when = stale.savedAt.formatted(.relative(presentation: .named))
+            if stale.isIncomplete {
+                parts.append("Restored a run from \(when) that never finished: \(stale.unclassified) bookmarks have no folder yet.")
+            } else {
+                parts.append("Restored a run from \(when).")
+            }
+        }
+
+        if let stale, stale.hasDrifted {
+            var drift: [String] = []
+            if stale.added > 0 { drift.append("\(stale.added) added") }
+            if stale.removed > 0 { drift.append("\(stale.removed) removed") }
+            parts.append("Your bookmarks changed since then: \(drift.joined(separator: ", ")).")
+        }
+
+        return parts.joined(separator: " ")
+    }
+
     private func stat(_ value: String, _ label: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
@@ -70,29 +133,15 @@ struct ContentView: View {
     private var controls: some View {
         HStack(spacing: 14) {
             Button {
-                Task { await model.classifySample() }
+                Task { await model.organize() }
             } label: {
-                Label("Organize", systemImage: "wand.and.stars")
+                Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
             }
             .keyboardShortcut(.return)
-            .disabled(model.isBusy || model.summary == nil)
-
-            // Discrete sizes read better than a stepper, and convey the cost.
-            Picker("", selection: $model.sampleSize) {
-                ForEach([30, 60, 120, 250], id: \.self) { Text("\($0)").tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 190)
-            .disabled(model.isBusy)
-
-            Button {
-                Task { await model.classifyAll() }
-            } label: {
-                Label("Organize All", systemImage: "square.stack.3d.up")
-            }
-            .disabled(model.isBusy || model.allBookmarks.isEmpty)
-            .help("Classify all \(model.allBookmarks.count) bookmarks. Takes about \(Int(model.estimatedSecondsForAll / 60)) minutes and cannot be interrupted safely yet.")
+            .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty)
+            .help(model.remaining.isEmpty
+                  ? "Every bookmark has a proposed folder."
+                  : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
 
             if case .classifying(let done, let total) = model.phase {
                 ProgressView(value: Double(done), total: Double(max(total, 1)))
@@ -100,18 +149,18 @@ struct ContentView: View {
                 Text("\(done)/\(total)")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Text("~\(Int((Double(total - done)) * 1.1))s left")
+                Text("~\(minutes(Double(total - done) * OrganizerModel.secondsPerBookmark)) left")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                Button("Stop") { model.cancel() }
-                    .help("Stop after the current batch and keep what is done")
+                Button("Pause") { model.pause() }
+                    .help("Stop after the current batch. Resume picks up where it left off.")
             } else if case .finishing = model.phase {
                 ProgressView().controlSize(.small)
                 Text("Grouping leftovers, naming new folders…")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else if model.rows.isEmpty {
-                Text("~\(Int(model.estimatedSeconds))s")
+            } else if !model.remaining.isEmpty {
+                Text("~\(minutes(model.estimatedSeconds))")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

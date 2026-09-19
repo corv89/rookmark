@@ -37,6 +37,9 @@ final class OrganizerModel {
         /// Classification is done but clustering and folder-naming still are not.
         /// Without this the bar sits at 100% looking hung.
         case finishing
+        /// Stopped part-way with work still outstanding. Distinct from `finished`
+        /// so the UI can offer Resume rather than implying the run is done.
+        case paused
         case finished
         case failed(String)
     }
@@ -53,8 +56,9 @@ final class OrganizerModel {
     private(set) var allBookmarks: [Bookmark] = []
 
     // Run
-    var sampleSize = 60
     private(set) var phase: Phase = .idle
+    /// Set when a restored run no longer matches the browser, or never finished.
+    private(set) var staleness: SessionStore.Staleness?
     private(set) var rows: [Row] = []
     private(set) var folders: [FolderGroup] = []
     private(set) var newFolders: [String] = []
@@ -120,14 +124,20 @@ final class OrganizerModel {
     var isBusy: Bool {
         switch phase {
         case .scanning, .classifying, .finishing: true
-        case .idle, .finished, .failed: false
+        case .idle, .paused, .finished, .failed: false
         }
+    }
+
+    /// Bookmarks in the profile that have no decision yet. This is what Organize
+    /// and Resume both work on, so resuming is just "keep going from here".
+    var remaining: [Bookmark] {
+        let done = Set(rows.map(\.id))
+        return allBookmarks.filter { !done.contains($0.id) }
     }
 
     /// Rate measured on this machine: roughly 1.1s per bookmark, serialized.
     static let secondsPerBookmark = 1.1
-    var estimatedSeconds: Double { Double(sampleSize) * Self.secondsPerBookmark }
-    var estimatedSecondsForAll: Double { Double(allBookmarks.count) * Self.secondsPerBookmark }
+    var estimatedSeconds: Double { Double(remaining.count) * Self.secondsPerBookmark }
 
     // MARK: - Scan
 
@@ -149,32 +159,79 @@ final class OrganizerModel {
                 taxonomy.folders.map { ($0.name, $0.rationale) },
                 uniquingKeysWith: { first, _ in first }
             )
+            restoreSession()
             phase = .idle
         } catch {
             phase = .failed(String(describing: error))
         }
     }
 
-    // MARK: - Run
+    /// Brings back the last run so quitting never loses work. Rows for bookmarks
+    /// that have since left the browser are dropped, so the table always reflects
+    /// what is actually there now.
+    private func restoreSession() {
+        guard let snapshot = SessionStore.load() else { return }
 
-    /// A random sample, so nothing is cherry-picked.
-    func classifySample() async {
-        await classify(Array(allBookmarks.shuffled().prefix(sampleSize)))
+        let liveIDs = Set(allBookmarks.map(\.id))
+        rows = snapshot.rows
+            .filter { liveIDs.contains($0.id) }
+            .map {
+                Row(id: $0.id, title: $0.title, url: $0.url, folder: $0.folder,
+                    confidence: $0.confidence, modelChoice: $0.modelChoice,
+                    included: $0.included, accepted: $0.accepted)
+            }
+        newFolders = snapshot.newFolders
+
+        let state = SessionStore.staleness(of: snapshot, against: allBookmarks)
+        staleness = state.isStale ? state : nil
+        if !rows.isEmpty { recountFolders() }
     }
 
-    func classifyAll() async {
-        await classify(allBookmarks)
+    private func saveSession(completed: Bool) {
+        guard !rows.isEmpty else { return }
+        SessionStore.save(.init(
+            savedAt: Date(),
+            sourceIDs: allBookmarks.map(\.id),
+            rows: rows.map {
+                .init(id: $0.id, title: $0.title, url: $0.url, folder: $0.folder,
+                      confidence: $0.confidence, modelChoice: $0.modelChoice,
+                      included: $0.included, accepted: $0.accepted)
+            },
+            newFolders: newFolders,
+            completed: completed
+        ))
+    }
+
+    /// Throws the saved run away and starts from nothing.
+    func discardSession() {
+        SessionStore.clear()
+        rows = []
+        folders = []
+        newFolders = []
+        staleness = nil
+        selectedFolder = nil
+        selectedRowID = nil
+        phase = .idle
+    }
+
+    // MARK: - Run
+
+    /// Classifies everything without a decision yet. Starting a fresh run and
+    /// resuming a stopped one are the same operation, which is why there is one
+    /// button rather than a size picker.
+    func organize() async {
+        await classify(remaining)
     }
 
     private func classify(_ sample: [Bookmark]) async {
         guard let taxonomy = pinnedTaxonomy, !sample.isEmpty else { return }
 
-        rows = []
-        folders = []
-        newFolders = []
+        // Rows already decided are kept: this may be a resume.
         selectedFolder = nil
         selectedRowID = nil
         wasCancelled = false
+        staleness = nil
+        let alreadyDone = rows.count
         phase = .classifying(done: 0, total: sample.count)
         let started = Date()
 
@@ -189,15 +246,23 @@ final class OrganizerModel {
 
         inFlight = Dictionary(sample.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+        // Report progress across the whole library, not just this leg, so a
+        // resumed run continues the count instead of restarting at zero.
         let onProgress: Classifier.ProgressHandler = { [weak self] done, total in
             Task { @MainActor in
-                self?.phase = done >= total ? .finishing : .classifying(done: done, total: total)
+                self?.phase = done >= total
+                    ? .finishing
+                    : .classifying(done: alreadyDone + done, total: alreadyDone + total)
             }
         }
 
         let onBatch: Classifier.BatchHandler = { [weak self] decisions in
             Task { @MainActor in
-                self?.apply(decisions)
+                guard let self else { return }
+                self.apply(decisions)
+                // Snapshot as we go, so a crash or a force-quit costs one batch
+                // rather than the whole run.
+                self.saveSession(completed: false)
             }
         }
 
@@ -229,6 +294,7 @@ final class OrganizerModel {
             apply(result.decisions)
             lastRunSeconds = Date().timeIntervalSince(started)
             phase = .finished
+            saveSession(completed: remaining.isEmpty)
         } catch is CancellationError {
             // Everything already streamed in stays on screen; only the items the
             // model never reached are missing, and they are absent rather than
@@ -236,9 +302,11 @@ final class OrganizerModel {
             wasCancelled = true
             recountFolders()
             lastRunSeconds = Date().timeIntervalSince(started)
-            phase = .finished
+            phase = remaining.isEmpty ? .finished : .paused
+            saveSession(completed: remaining.isEmpty)
         } catch {
             phase = .failed(String(describing: error))
+            saveSession(completed: false)
         }
         inFlight = [:]
     }
@@ -275,8 +343,9 @@ final class OrganizerModel {
         recountFolders()
     }
 
-    /// Stops the run and keeps whatever has already been classified.
-    func cancel() {
+    /// Stops after the current batch, keeping everything classified so far.
+    /// Resuming is just `organize()` again, which picks up `remaining`.
+    func pause() {
         runTask?.cancel()
     }
 
@@ -285,11 +354,13 @@ final class OrganizerModel {
     func judge(_ id: String, accepted: Bool) {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         rows[index].accepted = rows[index].accepted == accepted ? nil : accepted
+        saveSession(completed: remaining.isEmpty)
     }
 
     func toggleIncluded(_ id: String) {
         guard let index = rows.firstIndex(where: { $0.id == id }) else { return }
         rows[index].included.toggle()
+        saveSession(completed: remaining.isEmpty)
     }
 
     func move(_ id: String, to folder: String) {
@@ -301,6 +372,7 @@ final class OrganizerModel {
             included: row.included, accepted: row.accepted
         )
         recountFolders()
+        saveSession(completed: remaining.isEmpty)
     }
 
     private func recountFolders() {
