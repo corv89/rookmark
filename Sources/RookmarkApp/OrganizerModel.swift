@@ -992,23 +992,28 @@ final class OrganizerModel {
 
     /// Two-tier lookup, because the same binary has to work in the developer's
     /// checkout and in a shipped Rookmark.app:
-    ///  1. the source tree, resolved relative to this file — during development
-    ///     the app runs via `swift run`, and reading `tuning/` directly means
-    ///     taxonomy edits apply without a rebuild;
-    ///  2. the copy bundled as a resource (`Resources/`) — the only copy that
-    ///     exists once the app leaves this machine. `make-app.sh` packs the
-    ///     SwiftPM resource bundle into the .app, so this resolves on any Mac.
+    ///  1. DEBUG only: the source tree, resolved relative to this file — during
+    ///     development the app runs via `swift run`, and reading `tuning/`
+    ///     directly means taxonomy edits apply without a rebuild. Tier 1 is
+    ///     `#if DEBUG` because `#filePath` is baked in at compile time: a
+    ///     RELEASE build run on the machine that made it would otherwise read
+    ///     the build host's working checkout instead of the copy it ships.
+    ///  2. the copy bundled as a resource (`Resources/`) — the only tier in a
+    ///     release build, and the only copy that exists once the app leaves
+    ///     this machine. `make-app.sh` packs the SwiftPM resource bundle into
+    ///     the .app, so this resolves on any Mac.
     /// Existence (not a decode attempt) decides the tier, so a corrupt
     /// source-tree file surfaces as an error instead of silently loading a
     /// stale bundled copy.
     static func loadPinnedTaxonomy() throws -> Taxonomy {
+        let url: URL
+        #if DEBUG
         let repoRoot = URL(filePath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sourceTree = repoRoot.appending(path: "tuning/consolidated-taxonomy-v5.json")
 
-        let url: URL
         if FileManager.default.fileExists(atPath: sourceTree.path(percentEncoded: false)) {
             url = sourceTree
         } else if let bundled = Bundle.module.url(
@@ -1021,6 +1026,19 @@ final class OrganizerModel {
                 Bundle.module.bundleURL.path(percentEncoded: false),
             ])
         }
+        #else
+        // Release: exclusively the bundled copy. The source-tree path must
+        // not exist here even by accident — #filePath names the build host's
+        // checkout, which a distributed binary has no business reading.
+        guard let bundled = Bundle.module.url(
+            forResource: "consolidated-taxonomy-v5", withExtension: "json"
+        ) else {
+            throw TaxonomyNotFoundError(searched: [
+                Bundle.module.bundleURL.path(percentEncoded: false),
+            ])
+        }
+        url = bundled
+        #endif
         let envelope = try JSONDecoder().decode(TaxonomyEnvelope.self, from: try Data(contentsOf: url))
         return Taxonomy(folders: envelope.folders)
     }
