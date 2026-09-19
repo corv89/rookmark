@@ -44,11 +44,10 @@ struct ContentView: View {
                   : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
         }
 
-        // Only while a run is going. Adjacent toolbar items share one piece of
-        // glass, so a permanent count sat inside the action's own pill and read
-        // as text overflowing it; the idle count lives in the sidebar instead.
+        // Just the control. Adjacent toolbar items share one piece of glass, so
+        // a progress bar and two counters here crowded into the action's own
+        // pill; the sidebar callout carries the run's state instead.
         if model.isBusy {
-            ToolbarItem { runStatus }
             ToolbarItem {
                 Button("Pause") { model.pause() }
                     .help("Stop after the current batch. Resume picks up where it left off.")
@@ -85,30 +84,6 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var runStatus: some View {
-        switch model.phase {
-        case .classifying(let done, let total):
-            HStack(spacing: 8) {
-                ProgressView(value: Double(done), total: Double(max(total, 1)))
-                    .frame(width: 120)
-                Text("\(done.formatted(.number))/\(total.formatted(.number))")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Text("~\(minutes(Double(total - done) * OrganizerModel.secondsPerBookmark))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        case .finishing:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Grouping leftovers…").font(.callout).foregroundStyle(.secondary)
-            }
-        default:
-            EmptyView()
-        }
-    }
-
     private var organizeTitle: String {
         if case .paused = model.phase { return "Resume" }
         return model.rows.isEmpty ? "Organize" : "Continue"
@@ -136,14 +111,13 @@ struct ContentView: View {
                             .foregroundStyle(summary.orphanedFolderReferences > 0 ? .orange : .secondary)
                     }
                     LabeledContent("Taxonomy", value: "\(model.taxonomyFolderCount) folders")
-                    if !model.remaining.isEmpty, !model.rows.isEmpty {
-                        LabeledContent("Still to classify") {
-                            Text("\(model.remaining.count.formatted(.number)) · ~\(minutes(model.estimatedSeconds))")
-                        }
-                    }
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            }
+
+            if model.isBusy || (!model.rows.isEmpty && !model.remaining.isEmpty) {
+                workCallout
             }
 
             if !model.rows.isEmpty {
@@ -160,6 +134,67 @@ struct ContentView: View {
         }
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 210, ideal: 235, max: 300)
+    }
+
+    /// Owns the state of the work in both phases: what is left when idle, live
+    /// progress while running. One place for it means the toolbar does not have
+    /// to grow a progress bar and two counters the moment a run starts.
+    ///
+    /// Given the weight of the staleness banner rather than a quiet stat row,
+    /// but tinted with the accent colour instead of orange: work pending is not
+    /// a problem to be warned about.
+    private var workCallout: some View {
+        HStack(spacing: 10) {
+            if case .classifying = model.phase {
+                ProgressView().controlSize(.small)
+            } else if case .finishing = model.phase {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "tray.full.fill").foregroundStyle(.tint)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(calloutTitle)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if case .classifying(let done, let total) = model.phase {
+                    ProgressView(value: Double(done), total: Double(max(total, 1)))
+                        .controlSize(.small)
+                    Text("~\(minutes(Double(total - done) * OrganizerModel.secondsPerBookmark)) left")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if case .finishing = model.phase {
+                    Text("grouping leftovers")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("to classify · ~\(minutes(model.estimatedSeconds))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .glassEffect(.regular.tint(.accentColor.opacity(0.22)), in: .rect(cornerRadius: 10))
+        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 8, trailing: 8))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var calloutTitle: String {
+        switch model.phase {
+        case .classifying(let done, let total):
+            "\(done.formatted(.number)) of \(total.formatted(.number))"
+        case .finishing:
+            "Almost done"
+        default:
+            "\(model.remaining.count.formatted(.number)) left"
+        }
     }
 
     private func folderRow(name: String, count: Int, tag: String) -> some View {
