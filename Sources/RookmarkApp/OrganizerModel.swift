@@ -127,7 +127,12 @@ final class OrganizerModel {
     private(set) var rows: [Row] = []
     private(set) var folders: [FolderGroup] = []
     private(set) var newFolders: [String] = []
-    private(set) var taxonomyFolderCount = 0
+    /// The folder list this run classifies against. Seeded from the pinned
+    /// file at scan, edited in place by the user, saved/restored with the
+    /// session. The bundled tuning/*.json is never written.
+    private(set) var workingFolders: [Taxonomy.Folder] = []
+    /// Sidebar's "Taxonomy" count; derived so it can never drift from the list.
+    var taxonomyFolderCount: Int { workingFolders.count }
     private(set) var lastRunSeconds: Double?
     /// True when the last run was stopped early, so the table is partial.
     private(set) var wasCancelled = false
@@ -154,8 +159,6 @@ final class OrganizerModel {
     var selectedFolder: String? = OrganizerModel.allFolders
     var selectedRowID: String?
 
-    private var pinnedTaxonomy: Taxonomy?
-    private var rationales: [String: String] = [:]
     /// The detached worker. Held because a detached task does NOT inherit
     /// cancellation from whoever started it, so Stop has to cancel it directly.
     private var runTask: Task<Organizer.Result, Error>?
@@ -179,16 +182,23 @@ final class OrganizerModel {
     /// user has been asked.
     private var isNotificationAuthorized = false
 
+    /// Save seam: tests construct with `false` so a review action in a unit
+    /// test can never write the host machine's real `session.json` — the same
+    /// reason ImportSourceTests imports from `.invalid` hosts.
+    private let persistsSessions: Bool
+
     /// Both notification inputs are injected with production defaults, so
     /// `OrganizerModel()` stays the one constructor the app and the other
     /// suites use, while these tests can pin the two answers independently.
     /// Constant here: nothing re-aims them mid-run.
     init(
         notifications: any NotificationPosting = SystemNotifier(),
-        isAppVisible: @escaping @MainActor () -> Bool = { AppVisibility.isOnScreen }
+        isAppVisible: @escaping @MainActor () -> Bool = { AppVisibility.isOnScreen },
+        persistingSessions: Bool = true
     ) {
         self.notifications = notifications
         self.isAppVisible = isAppVisible
+        self.persistsSessions = persistingSessions
     }
 
     var visibleRows: [Row] {
@@ -215,7 +225,12 @@ final class OrganizerModel {
         return rows.first { $0.id == selectedRowID }
     }
 
-    func rationale(for folder: String) -> String? { rationales[folder] }
+    /// Exact match on purpose: the classifier hands back the taxonomy's own
+    /// casing (Classifier.validate), so the working list is the single source
+    /// of truth for folder text as well.
+    func rationale(for folder: String) -> String? {
+        workingFolders.first { $0.name == folder }?.rationale
+    }
 
     var acceptedCount: Int { rows.count(where: \.accepted) }
     var sortedCount: Int { rows.count { !$0.isUnsorted } }
@@ -378,8 +393,7 @@ final class OrganizerModel {
             wasCancelled: wasCancelled, lastRunSeconds: lastRunSeconds,
             selectedFolder: selectedFolder, selectedRowID: selectedRowID,
             search: search, sort: sort, phase: phase,
-            pinnedTaxonomy: pinnedTaxonomy, taxonomyFolderCount: taxonomyFolderCount,
-            rationales: rationales
+            workingFolders: workingFolders
         )
         // The run on screen belongs to the previous source. Clearing first means
         // the scanning state never shows old rows under a new source name.
@@ -387,6 +401,7 @@ final class OrganizerModel {
         rows = []
         folders = []
         newFolders = []
+        workingFolders = []           // re-seeded from the pinned file on success
         staleness = nil
         selectedFolder = Self.allFolders
         selectedRowID = nil
@@ -435,13 +450,9 @@ final class OrganizerModel {
             // replacement throw the old run away — a failed import must not.
             if discardingSession { SessionStore.clear() }
 
-            let taxonomy = try Self.loadPinnedTaxonomy()
-            pinnedTaxonomy = taxonomy
-            taxonomyFolderCount = taxonomy.folders.count
-            rationales = Dictionary(
-                taxonomy.folders.map { ($0.name, $0.rationale) },
-                uniquingKeysWith: { first, _ in first }
-            )
+            // The scan starts from the bundled taxonomy; a restored snapshot
+            // then layers its own edited copy on top (restoreSession).
+            workingFolders = try Self.loadPinnedTaxonomy().folders
             // Ids are content-derived, so this restores a file-sourced snapshot by
             // the same rule as an Orion one: matching ids come back, the rest count
             // as drift. Note that launch still scans Orion first, so a file run is
@@ -466,9 +477,7 @@ final class OrganizerModel {
             selectedRowID = previous.selectedRowID
             search = previous.search
             sort = previous.sort
-            pinnedTaxonomy = previous.pinnedTaxonomy
-            taxonomyFolderCount = previous.taxonomyFolderCount
-            rationales = previous.rationales
+            workingFolders = previous.workingFolders
             let message = String(describing: error)
             if rows.isEmpty {
                 // Nothing on screen to protect: the failure is the whole story and
@@ -512,6 +521,10 @@ final class OrganizerModel {
                     accepted: $0.accepted)
             }
         newFolders = snapshot.newFolders
+        // The edited folder list belongs to the session, like the rows do.
+        // Absent (a snapshot written before editing existed) or empty → keep
+        // whatever the scan loaded from the bundled file.
+        if let folders = snapshot.taxonomyFolders, !folders.isEmpty { workingFolders = folders }
 
         let state = SessionStore.staleness(of: snapshot, against: allBookmarks)
         staleness = state.isStale ? state : nil
@@ -519,7 +532,9 @@ final class OrganizerModel {
     }
 
     private func saveSession(completed: Bool) {
-        guard !rows.isEmpty else { return }
+        // An edit made before the first run has no rows yet but must survive
+        // quit all the same, hence the workingFolders half of the guard.
+        guard persistsSessions, !rows.isEmpty || !workingFolders.isEmpty else { return }
         SessionStore.save(.init(
             savedAt: Date(),
             sourceIDs: allBookmarks.map(\.id),
@@ -529,7 +544,8 @@ final class OrganizerModel {
                       accepted: $0.accepted)
             },
             newFolders: newFolders,
-            completed: completed
+            completed: completed,
+            taxonomyFolders: workingFolders
         ))
     }
 
@@ -544,6 +560,7 @@ final class OrganizerModel {
         selectedRowID = nil
         importFailureMessage = nil   // Start over clears stale banners too
         phase = .idle
+        resetTaxonomyToPinned()      // Start over also undoes folder edits
     }
 
     // MARK: - Run
@@ -558,7 +575,7 @@ final class OrganizerModel {
     }
 
     private func classify(_ sample: [Bookmark]) async {
-        guard let taxonomy = pinnedTaxonomy, !sample.isEmpty else { return }
+        guard !workingFolders.isEmpty, !sample.isEmpty else { return }
 
         // Rows already decided are kept: this may be a resume.
         selectedFolder = Self.allFolders
@@ -570,6 +587,10 @@ final class OrganizerModel {
         let started = Date()
 
         let html = NetscapeBookmarkWriter().write(sample)
+        // The working copy, captured here at run start: the UI blocks edits
+        // mid-run and the classifier builds its schema once from this list,
+        // so the run sorts against exactly what the user approved.
+        let taxonomy = Taxonomy(folders: workingFolders)
         let options = Organizer.Options(
             stateful: false,
             clustering: ClusteringConfig(enabled: true),
@@ -615,11 +636,13 @@ final class OrganizerModel {
             defer { runTask = nil }
             let result = try await work.value
 
-            // Clustering can mint folders that weren't in the pinned taxonomy.
-            let known = Set(taxonomy.names)
+            // Clustering can mint folders that weren't in the working list.
+            // They join it, so their rationale survives a relaunch and the
+            // next run — or the move menus — can file into them.
+            let known = Set(workingFolders.map(\.name))
             newFolders = result.taxonomy.names.filter { !known.contains($0) }
-            for folder in result.taxonomy.folders where rationales[folder.name] == nil {
-                rationales[folder.name] = folder.rationale
+            for folder in result.taxonomy.folders where !known.contains(folder.name) {
+                workingFolders.append(folder)
             }
 
             // Final reconciliation. Going through `apply` rather than rebuilding
@@ -753,12 +776,14 @@ final class OrganizerModel {
         saveSession(completed: remaining.isEmpty)
     }
 
+    /// Sidebar + move-menu list: every working folder — even an empty one, so
+    /// a freshly added folder is immediately a move target — plus any row-only
+    /// name left over from an older snapshot.
     private func recountFolders() {
         let counts = Dictionary(grouping: rows, by: \.folder).mapValues(\.count)
-        var names = Set(folders.map(\.name))
+        var names = Set(workingFolders.map(\.name))
         names.formUnion(counts.keys)
-        folders = names.map { FolderGroup(name: $0, count: counts[$0] ?? 0, rationale: rationales[$0] ?? "") }
-            .filter { $0.count > 0 }
+        folders = names.map { FolderGroup(name: $0, count: counts[$0] ?? 0, rationale: rationale(for: $0) ?? "") }
             .sorted {
                 if $0.name == Taxonomy.unsorted { return false }
                 if $1.name == Taxonomy.unsorted { return true }
@@ -779,6 +804,163 @@ final class OrganizerModel {
         let url = URL.downloadsDirectory.appending(path: "rookmark-\(exportStem).organized.html")
         try NetscapeBookmarkWriter().write(organized).write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    // MARK: - Taxonomy editing
+    //
+    // Light in-GUI editing of the working copy. The bundled JSON stays the
+    // default and is never written; every mutation lands in `workingFolders`
+    // and in the session snapshot. Names are compared canonically — mirroring
+    // Classifier.canonical, because that is exactly how the classifier decides
+    // whether a folder name it produced is one of ours.
+
+    /// Mirrors Classifier.canonical (lowercase + trim) — the classifier
+    /// matches folder names this way, so uniqueness is checked this way.
+    static func canonicalFolderName(_ s: String) -> String {
+        s.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Batch prompts re-send every folder; past ~25 the derived batch size
+    /// shrinks and the run slows. Warned in the editor, never enforced here —
+    /// the kit applies its own hard ceiling (constrainedFolderCap) at runtime.
+    static let largeTaxonomyThreshold = 25
+    var isTaxonomyOversized: Bool { workingFolders.count > Self.largeTaxonomyThreshold }
+
+    /// A rejected edit surfaces in the editor as an enabled-with-error state
+    /// rather than an alert, so the cases carry user-facing wording.
+    enum TaxonomyEditError: Error, Equatable, LocalizedError {
+        case emptyName
+        case duplicateName(String)
+        case protectedFolder   // the Unsorted sentinel
+        case unknownFolder
+        case sameFolder        // merge source == target
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyName: "A folder needs a name."
+            case .duplicateName(let name): "A folder named “\(name)” already exists."
+            case .protectedFolder: "Unsorted is the catch-all; it can’t be added, renamed, or deleted."
+            case .unknownFolder: "That folder is no longer in the list."
+            case .sameFolder: "Choose a different folder to merge into."
+            }
+        }
+    }
+
+    /// Renames a folder and re-labels every row already classified into it.
+    /// A case-only respelling of the same name is allowed (canonical names
+    /// match) and doubles as the way to fix a folder's rationale.
+    func updateFolder(_ name: String, to newName: String, rationale: String) throws {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw TaxonomyEditError.emptyName }
+        guard Self.canonicalFolderName(name) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
+        guard let index = workingFolders.firstIndex(where: { $0.name == name }) else {
+            throw TaxonomyEditError.unknownFolder
+        }
+        if let clash = workingFolders.enumerated().first(where: {
+            $0.offset != index
+                && Self.canonicalFolderName($0.element.name) == Self.canonicalFolderName(trimmed)
+        }) {
+            throw TaxonomyEditError.duplicateName(clash.element.name)
+        }
+
+        workingFolders[index] = Taxonomy.Folder(name: trimmed, rationale: rationale)
+        relabel(rowsIn: name, to: trimmed)
+        if selectedFolder == name { selectedFolder = trimmed }
+        if let renamed = newFolders.firstIndex(of: name) { newFolders[renamed] = trimmed }
+
+        recountFolders()
+        saveSession(completed: remaining.isEmpty)
+    }
+
+    /// Deletes a folder. Its bookmarks fall back to Unsorted so nothing is
+    /// lost; the editor's confirmation dialog spells that consequence out
+    /// before this runs.
+    func deleteFolder(_ name: String) throws {
+        guard Self.canonicalFolderName(name) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
+        guard workingFolders.contains(where: { $0.name == name }) else {
+            throw TaxonomyEditError.unknownFolder
+        }
+
+        workingFolders.removeAll { $0.name == name }
+        relabel(rowsIn: name, to: Taxonomy.unsorted)
+        newFolders.removeAll { $0 == name }
+        if selectedFolder == name { selectedFolder = Self.allFolders }
+
+        recountFolders()
+        saveSession(completed: remaining.isEmpty)
+    }
+
+    /// Appends a folder that starts empty. recountFolders seeds from the
+    /// working list, so it is a sidebar row and a move target immediately.
+    func addFolder(named name: String, rationale: String) throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw TaxonomyEditError.emptyName }
+        guard Self.canonicalFolderName(trimmed) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
+        if let clash = workingFolders.first(where: {
+            Self.canonicalFolderName($0.name) == Self.canonicalFolderName(trimmed)
+        }) {
+            throw TaxonomyEditError.duplicateName(clash.name)
+        }
+
+        workingFolders.append(Taxonomy.Folder(name: trimmed, rationale: rationale))
+
+        recountFolders()
+        saveSession(completed: remaining.isEmpty)
+    }
+
+    /// Moves every row of `source` into `target`, then removes `source`.
+    func mergeFolder(_ source: String, into target: String) throws {
+        guard workingFolders.contains(where: { $0.name == source }),
+              workingFolders.contains(where: { $0.name == target }) else {
+            throw TaxonomyEditError.unknownFolder
+        }
+        guard source != target else { throw TaxonomyEditError.sameFolder }
+        guard Self.canonicalFolderName(source) != Self.canonicalFolderName(Taxonomy.unsorted),
+              Self.canonicalFolderName(target) != Self.canonicalFolderName(Taxonomy.unsorted) else {
+            throw TaxonomyEditError.protectedFolder
+        }
+
+        relabel(rowsIn: source, to: target)
+        workingFolders.removeAll { $0.name == source }
+        newFolders.removeAll { $0 == source }
+        if selectedFolder == source { selectedFolder = Self.allFolders }
+
+        recountFolders()
+        saveSession(completed: remaining.isEmpty)
+    }
+
+    /// Row folders are `let`, so a re-file rebuilds the row — which is also
+    /// what keeps accepted/confidence/modelChoice untouched.
+    private func relabel(rowsIn name: String, to target: String) {
+        for index in rows.indices where rows[index].folder == name {
+            let row = rows[index]
+            rows[index] = Row(
+                id: row.id, title: row.title, url: row.url,
+                folder: target, confidence: row.confidence, modelChoice: row.modelChoice,
+                accepted: row.accepted
+            )
+        }
+    }
+
+    /// Back to the bundled defaults. Rows keep whatever folder names they
+    /// already carry; those names stay visible and moveable, they just stop
+    /// being classification targets.
+    func resetTaxonomyToPinned() {
+        workingFolders = (try? Self.loadPinnedTaxonomy())?.folders ?? workingFolders
+        recountFolders()
+    }
+
+    /// Test seam mirroring updateRows/updateSource: drives the working list
+    /// without a real scan or a bundled-file read.
+    func updateWorkingTaxonomy(_ folders: [Taxonomy.Folder]) {
+        workingFolders = folders
+        recountFolders()
     }
 
     // MARK: - Taxonomy
