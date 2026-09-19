@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var model: OrganizerModel
     @State private var exportedPath: String?
+    @State private var settingsLinkFailed = false
 
     var body: some View {
         NavigationSplitView {
@@ -17,6 +18,11 @@ struct ContentView: View {
         }
         .toolbar { toolbarContent }
         .searchable(text: $model.search, prompt: "Search titles and URLs")
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Apple Intelligence can be enabled while Rookmark is running;
+            // availability is re-read, never latched.
+            model.refreshModelAvailability()
+        }
     }
 
     // MARK: - Toolbar
@@ -38,7 +44,7 @@ struct ContentView: View {
                     .labelStyle(.titleAndIcon)
             }
             .keyboardShortcut(.return)
-            .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty)
+            .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty || !model.isModelAvailable)
             .help(model.remaining.isEmpty
                   ? "Every bookmark has a proposed folder."
                   : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
@@ -225,12 +231,19 @@ struct ContentView: View {
         case .classifying where model.rows.isEmpty, .finishing where model.rows.isEmpty:
             working
         case .idle where model.rows.isEmpty:
-            notice(
-                "Nothing leaves this Mac. Classification runs against the on-device model, and your browser's bookmarks are never modified. Rookmark only ever writes a new file.",
-                systemImage: "lock.laptopcomputer"
-            )
+            if case .unavailable = model.modelAvailability {
+                // Availability outranks the privacy blurb: Organize can't run,
+                // so the first thing a blocked user reads is why.
+                modelUnavailableNotice
+            } else {
+                notice(
+                    "Nothing leaves this Mac. Classification runs against the on-device model, and your browser's bookmarks are never modified. Rookmark only ever writes a new file.",
+                    systemImage: "lock.laptopcomputer"
+                )
+            }
         default:
             VStack(spacing: 0) {
+                availabilityBanner
                 statusBanner
                 resultsTable
                 if model.selectedRow != nil { inspector }
@@ -252,6 +265,86 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
+    }
+
+    /// Full-detail notice when nothing else is on screen. Same layout as
+    /// `notice(_:systemImage:tint:)` plus the settings button it can't carry.
+    private var modelUnavailableNotice: some View {
+        let state = model.modelAvailability
+        return VStack(spacing: 10) {
+            Image(systemName: "apple.intelligence")
+                .font(.system(size: 30))
+                .foregroundStyle(.orange)
+
+            VStack(spacing: 6) {
+                if case .unavailable(let reason, let fixable) = state {
+                    Text(reason)
+                    Text(fixable
+                         ? "Rookmark classifies bookmarks with Apple's on-device model. Once it's ready, switch back to Rookmark and this notice clears by itself."
+                         : "Rookmark depends on Apple Intelligence, so it cannot sort bookmarks on this Mac.")
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 440)
+
+            if case .unavailable(_, true) = state {
+                if settingsLinkFailed {
+                    // Deep-link fallback; the reason already names the pane.
+                    Text("System Settings ▸ Apple Intelligence & Siri")
+                        .font(.callout.weight(.medium))
+                } else {
+                    Button("Open Apple Intelligence & Siri settings") {
+                        openAppleIntelligenceSettings()
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    /// Compact version when a table is on screen (restored or finished run):
+    /// same information in the status-banner idiom, so review/export stay
+    /// available — only Organize is gated.
+    @ViewBuilder
+    private var availabilityBanner: some View {
+        if case .unavailable(let reason, let showsSettingsLink) = model.modelAvailability {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .imageScale(.small)
+                Text(reason)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if showsSettingsLink && !settingsLinkFailed {
+                    Button("Open Apple Intelligence & Siri settings") {
+                        openAppleIntelligenceSettings()
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .capsule)
+            .padding(.bottom, 10)
+            .frame(maxWidth: 720)
+        }
+    }
+
+    /// `open(_:)` returns false where the link doesn't resolve; the reason
+    /// strings already name the path, so the fallback shows it as text.
+    private func openAppleIntelligenceSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.Siri-Settings.extension"),
+              NSWorkspace.shared.open(url)
+        else {
+            settingsLinkFailed = true
+            return
+        }
     }
 
     private var working: some View {
