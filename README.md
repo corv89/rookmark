@@ -73,6 +73,11 @@ least-confident-first so your attention lands where the model is weakest, and an
 inspector explaining why each item went where it did. Nothing is written until
 you press Export.
 
+Any other browser works too: export your bookmarks as HTML and drop the file on
+the window (Safari: File ▸ Export Bookmarks). You can also press Cmd+O. The file
+is only read, never modified, and the result still comes back as a new file when
+you press Export.
+
 ### Command line
 
 ```
@@ -136,8 +141,10 @@ runbook. The `eval` subcommand reproduces all of it.
 
 ## Known limitations
 
-- Safari's bookmarks are unreadable without Full Disk Access; please export manually
-  from Safari and open the file instead. Chrome and Firefox importers are not available yet.
+- Safari's bookmarks are unreadable without Full Disk Access; export manually
+  from Safari and drop the file on the window instead. Chrome, Firefox, Edge,
+  and Brave work the same way: export bookmarks as HTML from the browser's
+  bookmark manager, then drop the file on the window.
 - The taxonomy is flat. Rookmark won't create nested folder structures.
 
 ## Contributing
