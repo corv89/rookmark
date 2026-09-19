@@ -134,6 +134,11 @@ final class OrganizerModel {
     /// A file import waiting on the replace confirmation. Non-nil drives the
     /// dialog; the load has not started.
     private(set) var pendingImport: URL?
+    /// Set when an import failed while a run was on screen: the run survives, so
+    /// the failure is reported as a dismissible banner in ContentView instead of
+    /// taking over the whole detail view (`.failed` is reserved for failures with
+    /// nothing to protect). Cleared by `dismissImportFailure()`.
+    private(set) var importFailureMessage: String?
     /// On-device model availability, re-read at scan time and on every app
     /// activation. Never latch a result: Apple Intelligence can be turned on
     /// while Rookmark is running.
@@ -242,7 +247,7 @@ final class OrganizerModel {
     func requestImport(from url: URL) {
         guard !isBusy else { return }                    // the UI rejects the drag first
         guard Self.isImportableFile(url) else {
-            phase = .failed("\(url.lastPathComponent) is not a bookmarks export. Expected an .html or .htm file.")
+            reportImportFailure("\(url.lastPathComponent) is not a bookmarks export. Expected an .html or .htm file.")
             return
         }
         if importRequiresConfirmation(for: url) {
@@ -259,6 +264,19 @@ final class OrganizerModel {
     }
 
     func cancelImport() { pendingImport = nil }
+
+    /// Where a refused or failed import lands: with a run on screen the run is
+    /// kept and the failure becomes the dismissible banner; with nothing on
+    /// screen the failure is the whole story and `.failed` shows.
+    private func reportImportFailure(_ message: String) {
+        if rows.isEmpty {
+            phase = .failed(message)
+        } else {
+            importFailureMessage = message
+        }
+    }
+
+    func dismissImportFailure() { importFailureMessage = nil }
 
     // State-update halves split out so tests can drive the import gate without a
     // real load: drag-and-drop and NSOpenPanel cannot run in CI, and neither can
@@ -294,6 +312,20 @@ final class OrganizerModel {
 
     private func load(_ newSource: Source, discardingSession: Bool) async {
         refreshModelAvailability()
+        // Rollback snapshot: if the new source cannot be read, the model returns to
+        // exactly this state. Chosen over leaving an "honest empty" model because a
+        // failed import over a live run must leave that run intact (T3 review,
+        // majors 1 and 3); rolling back to an empty prior state covers the
+        // nothing-on-screen case with the same code.
+        let previous = (
+            source: source, allBookmarks: allBookmarks, sourceSummary: sourceSummary,
+            rows: rows, folders: folders, newFolders: newFolders, staleness: staleness,
+            wasCancelled: wasCancelled, lastRunSeconds: lastRunSeconds,
+            selectedFolder: selectedFolder, selectedRowID: selectedRowID,
+            search: search, sort: sort, phase: phase,
+            pinnedTaxonomy: pinnedTaxonomy, taxonomyFolderCount: taxonomyFolderCount,
+            rationales: rationales
+        )
         // The run on screen belongs to the previous source. Clearing first means
         // the scanning state never shows old rows under a new source name.
         source = newSource
@@ -303,6 +335,9 @@ final class OrganizerModel {
         staleness = nil
         selectedFolder = Self.allFolders
         selectedRowID = nil
+        search = ""                       // stale review filters belong to the old run
+        sort = .leastConfident
+        importFailureMessage = nil        // a retry that succeeds clears the banner
         wasCancelled = false
         lastRunSeconds = nil
         phase = .scanning
@@ -318,7 +353,9 @@ final class OrganizerModel {
                     phase = .idle
                     return
                 }
-                let imported = try OrionImporter.importFavourites(at: url)
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    try OrionImporter.importFavourites(at: url)
+                }.value
                 allBookmarks = imported.parse.bookmarks
                 sourceSummary = SourceSummary(
                     bookmarkCount: imported.summary.bookmarkCount,
@@ -326,9 +363,14 @@ final class OrganizerModel {
                 )
             case .file(let url):
                 // Parse only, exactly like the CLI: read the bytes, never write to
-                // the file, never fetch anything a bookmark points at.
-                let html = try String(contentsOf: url, encoding: .utf8)
-                let parse = NetscapeBookmarkParser().parse(html)
+                // the file, never fetch anything a bookmark points at. The isFileURL
+                // guard keeps that promise for remote URLs, which isImportableFile
+                // alone does not catch ("https://host/x.html" has a html extension).
+                let parse = try await Task.detached(priority: .userInitiated) { () throws -> ParseResult in
+                    guard url.isFileURL else { throw NonFileImportError(url: url) }
+                    let html = try String(contentsOf: url, encoding: .utf8)
+                    return NetscapeBookmarkParser().parse(html)
+                }.value
                 guard !parse.bookmarks.isEmpty else { throw ImportError(file: url) }
                 allBookmarks = parse.bookmarks
                 sourceSummary = SourceSummary(bookmarkCount: parse.bookmarks.count)
@@ -352,7 +394,37 @@ final class OrganizerModel {
             restoreSession()
             phase = .idle
         } catch {
-            phase = .failed(String(describing: error))
+            // The new source never loaded. Roll the whole model back rather than
+            // show the old library under the new source's name: with rows cleared
+            // but allBookmarks stale, `remaining` would re-arm Organize against the
+            // old library under the dropped file's export stem (T3 review, major 1).
+            source = previous.source
+            allBookmarks = previous.allBookmarks
+            sourceSummary = previous.sourceSummary
+            rows = previous.rows
+            folders = previous.folders
+            newFolders = previous.newFolders
+            staleness = previous.staleness
+            wasCancelled = previous.wasCancelled
+            lastRunSeconds = previous.lastRunSeconds
+            selectedFolder = previous.selectedFolder
+            selectedRowID = previous.selectedRowID
+            search = previous.search
+            sort = previous.sort
+            pinnedTaxonomy = previous.pinnedTaxonomy
+            taxonomyFolderCount = previous.taxonomyFolderCount
+            rationales = previous.rationales
+            let message = String(describing: error)
+            if rows.isEmpty {
+                // Nothing on screen to protect: the failure is the whole story and
+                // the full-detail failed notice (with its Start over button) shows.
+                phase = .failed(message)
+            } else {
+                // A run is on screen: keep it, keep its phase, report the failure
+                // as a dismissible banner instead (T3 review, major 3).
+                phase = previous.phase
+                importFailureMessage = message
+            }
         }
     }
 
@@ -360,6 +432,13 @@ final class OrganizerModel {
         let file: URL
         var description: String {
             "No bookmarks found in \(file.lastPathComponent). Expected a Netscape-format export, the file every browser's Export Bookmarks command writes."
+        }
+    }
+
+    private struct NonFileImportError: Error, CustomStringConvertible {
+        let url: URL
+        var description: String {
+            "\(url.absoluteString) is not a file on this Mac. Bookmark exports are read from disk; nothing is fetched."
         }
     }
 
@@ -408,6 +487,7 @@ final class OrganizerModel {
         staleness = nil
         selectedFolder = Self.allFolders
         selectedRowID = nil
+        importFailureMessage = nil   // Start over clears stale banners too
         phase = .idle
     }
 
