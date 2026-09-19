@@ -25,9 +25,10 @@ final class OrganizerModel {
     }
 
     /// Sentinel for the sidebar's "All" row. A List selection binding cannot
-    /// carry nil, so the unfiltered case needs a real value; no folder can be
-    /// empty-named, which makes "" safe.
-    static let allFolders = ""
+    /// carry nil, so the unfiltered case needs a real value — and it cannot be
+    /// the empty string either, which SwiftUI treats as no selection at all.
+    /// Never displayed: the row renders its own label.
+    static let allFolders = "__rookmark_all__"
 
     struct FolderGroup: Identifiable {
         var id: String { name }
