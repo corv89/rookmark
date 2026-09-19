@@ -58,6 +58,36 @@ final class OrganizerModel {
         var id: String { rawValue }
     }
 
+    /// What the UI needs to know about the on-device model: the notice text
+    /// and whether System Settings can change the outcome. The kit reports a
+    /// described reason string (`SessionFactory.describe`); deciding what the
+    /// app does about each reason is presentation, so the mapping lives here.
+    enum ModelAvailability: Equatable {
+        case available
+        case unavailable(reason: String, showsSettingsLink: Bool)
+
+        init(_ availability: SessionFactory.Availability) {
+            switch availability {
+            case .available:
+                self = .available
+            case .unavailable(let reason):
+                // Every reason can be acted on from the Apple Intelligence &
+                // Siri pane (off → turn on, not ready → watch the download)
+                // except an ineligible Mac, where there is nothing to enable.
+                // That wording is `SessionFactory.describe(.deviceNotEligible)`
+                // — the kit's stable string — matched by prefix so trailing
+                // edits don't break it.
+                self = .unavailable(
+                    reason: reason,
+                    showsSettingsLink: !reason.hasPrefix(Self.ineligiblePrefix)
+                )
+            }
+        }
+
+        /// ASCII apostrophe, byte-identical to SessionFactory.swift:58.
+        private static let ineligiblePrefix = "This Mac isn't eligible"
+    }
+
     // Profile
     private(set) var summary: OrionImporter.Summary?
     private(set) var allBookmarks: [Bookmark] = []
@@ -73,6 +103,10 @@ final class OrganizerModel {
     private(set) var lastRunSeconds: Double?
     /// True when the last run was stopped early, so the table is partial.
     private(set) var wasCancelled = false
+    /// On-device model availability, re-read at scan time and on every app
+    /// activation. Never latch a result: Apple Intelligence can be turned on
+    /// while Rookmark is running.
+    private(set) var availability: SessionFactory.Availability = .available
 
     // Review state
     var search = ""
@@ -125,6 +159,27 @@ final class OrganizerModel {
         }
     }
 
+    /// Derived, so a re-check refreshes the UI automatically.
+    var modelAvailability: ModelAvailability { ModelAvailability(availability) }
+
+    /// Gates the Organize control: the run cannot succeed without the model.
+    var isModelAvailable: Bool {
+        if case .available = availability { return true }
+        return false
+    }
+
+    /// Production path: `SessionFactory` is Sendable and the check is a cheap
+    /// synchronous status read (same call `doctor` makes).
+    func refreshModelAvailability() {
+        availability = SessionFactory().availability()
+    }
+
+    /// State-update half split out so tests can drive it without the real
+    /// model — FoundationModels cannot run in CI.
+    func updateAvailability(_ newValue: SessionFactory.Availability) {
+        availability = newValue
+    }
+
     /// Bookmarks in the profile that have no decision yet. This is what Organize
     /// and Resume both work on, so resuming is just "keep going from here".
     var remaining: [Bookmark] {
@@ -139,6 +194,7 @@ final class OrganizerModel {
     // MARK: - Scan
 
     func scan() async {
+        refreshModelAvailability()
         phase = .scanning
         do {
             guard let url = OrionImporter.defaultFavouritesURL() else {
@@ -217,6 +273,7 @@ final class OrganizerModel {
     /// resuming a stopped one are the same operation, which is why there is one
     /// button rather than a size picker.
     func organize() async {
+        guard isModelAvailable else { return }
         await classify(remaining)
     }
 
