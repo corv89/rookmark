@@ -17,6 +17,11 @@ enum SessionStore {
         var rows: [StoredRow]
         var newFolders: [String]
         var completed: Bool
+        /// The working folder list (name + rationale) at save time. Absent in
+        /// snapshots written before folder editing existed — decoding tolerates
+        /// that and the app falls back to the pinned taxonomy. Stays on-device
+        /// in this file, exactly like rows.
+        var taxonomyFolders: [Taxonomy.Folder]? = nil
     }
 
     struct StoredRow: Codable {
