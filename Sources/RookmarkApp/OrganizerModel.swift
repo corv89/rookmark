@@ -58,6 +58,24 @@ final class OrganizerModel {
         var id: String { rawValue }
     }
 
+    /// Where the bookmarks under review came from. Launch reads the installed
+    /// Orion profile; a user-initiated import reads any Netscape-format export.
+    /// The pipeline downstream of this (parse -> taxonomy -> classify -> export)
+    /// is identical for both, because ids are derived from the normalized URL.
+    enum Source: Equatable {
+        case orionProfile
+        case file(URL)
+
+        /// What the sidebar calls it. Requirement: the user can always tell which
+        /// library is loaded.
+        var name: String {
+            switch self {
+            case .orionProfile: "Orion profile"
+            case .file(let url): url.lastPathComponent
+            }
+        }
+    }
+
     /// What the UI needs to know about the on-device model: the notice text
     /// and whether System Settings can change the outcome. The kit reports a
     /// described reason string (`SessionFactory.describe`); deciding what the
@@ -89,8 +107,18 @@ final class OrganizerModel {
     }
 
     // Profile
-    private(set) var summary: OrionImporter.Summary?
+    private(set) var source: Source?
     private(set) var allBookmarks: [Bookmark] = []
+    /// Counts the sidebar shows about whatever source is loaded. Nil until one is.
+    /// Orion reports its own file's irregularities; a generic export has none to
+    /// report, hence the optional.
+    private(set) var sourceSummary: SourceSummary?
+
+    struct SourceSummary: Equatable {
+        var bookmarkCount: Int
+        /// Orion only: bookmarks whose parent folder entry is missing.
+        var orphanedFolderReferences: Int?
+    }
 
     // Run
     private(set) var phase: Phase = .idle
@@ -103,6 +131,9 @@ final class OrganizerModel {
     private(set) var lastRunSeconds: Double?
     /// True when the last run was stopped early, so the table is partial.
     private(set) var wasCancelled = false
+    /// A file import waiting on the replace confirmation. Non-nil drives the
+    /// dialog; the load has not started.
+    private(set) var pendingImport: URL?
     /// On-device model availability, re-read at scan time and on every app
     /// activation. Never latch a result: Apple Intelligence can be turned on
     /// while Rookmark is running.
@@ -168,6 +199,17 @@ final class OrganizerModel {
         return false
     }
 
+    var sourceName: String { source?.name ?? "" }
+
+    /// Export file stem. Orion keeps its historical name; a file run is named for
+    /// its file so two sources never write over each other's export.
+    private var exportStem: String {
+        switch source {
+        case .orionProfile, nil: "orion"
+        case .file(let url): url.deletingPathExtension().lastPathComponent
+        }
+    }
+
     /// Production path: `SessionFactory` is Sendable and the check is a cheap
     /// synchronous status read (same call `doctor` makes).
     func refreshModelAvailability() {
@@ -179,6 +221,50 @@ final class OrganizerModel {
     func updateAvailability(_ newValue: SessionFactory.Availability) {
         availability = newValue
     }
+
+    /// Only html/htm exports are importable; both drag-and-drop and the open
+    /// panel gate through this so the two paths cannot disagree.
+    static func isImportableFile(_ url: URL) -> Bool {
+        ["html", "htm"].contains(url.pathExtension.lowercased())
+    }
+
+    /// Importing a file replaces the run on screen, which is a destructive act, so
+    /// it needs the user's OK. Re-opening the very file the current run came from
+    /// is the exception: that is a reload, and the saved rows come back.
+    func importRequiresConfirmation(for url: URL) -> Bool {
+        guard !rows.isEmpty else { return false }
+        if case .file(let current) = source, current == url { return false }
+        return true
+    }
+
+    /// Entry point for both the drop and the open panel. Either gates on the
+    /// confirmation above or starts the load; nothing is read before the gate.
+    func requestImport(from url: URL) {
+        guard !isBusy else { return }                    // the UI rejects the drag first
+        guard Self.isImportableFile(url) else {
+            phase = .failed("\(url.lastPathComponent) is not a bookmarks export. Expected an .html or .htm file.")
+            return
+        }
+        if importRequiresConfirmation(for: url) {
+            pendingImport = url
+        } else {
+            Task { await importFile(at: url, discardingSession: false) }
+        }
+    }
+
+    func confirmImport() {
+        guard let url = pendingImport else { return }
+        pendingImport = nil
+        Task { await importFile(at: url, discardingSession: true) }
+    }
+
+    func cancelImport() { pendingImport = nil }
+
+    // State-update halves split out so tests can drive the import gate without a
+    // real load: drag-and-drop and NSOpenPanel cannot run in CI, and neither can
+    // the model. Mirrors updateAvailability(_:).
+    func updateSource(_ newValue: Source?) { source = newValue }
+    func updateRows(_ newValue: [Row]) { rows = newValue }
 
     /// Bookmarks in the profile that have no decision yet. This is what Organize
     /// and Resume both work on, so resuming is just "keep going from here".
@@ -193,17 +279,64 @@ final class OrganizerModel {
 
     // MARK: - Scan
 
+    /// Launch path: read the installed Orion profile when there is one. A machine
+    /// without Orion is not an error; `source` stays nil and the UI offers the
+    /// drop-target empty state instead.
     func scan() async {
+        await load(.orionProfile, discardingSession: false)
+    }
+
+    /// User-initiated import of a bookmarks HTML export. `discardingSession` is
+    /// true only on the confirmed-replacement path.
+    func importFile(at url: URL, discardingSession: Bool) async {
+        await load(.file(url), discardingSession: discardingSession)
+    }
+
+    private func load(_ newSource: Source, discardingSession: Bool) async {
         refreshModelAvailability()
+        // The run on screen belongs to the previous source. Clearing first means
+        // the scanning state never shows old rows under a new source name.
+        source = newSource
+        rows = []
+        folders = []
+        newFolders = []
+        staleness = nil
+        selectedFolder = Self.allFolders
+        selectedRowID = nil
+        wasCancelled = false
+        lastRunSeconds = nil
         phase = .scanning
         do {
-            guard let url = OrionImporter.defaultFavouritesURL() else {
-                phase = .failed("No Orion profile found in ~/Library/Application Support/Orion.")
-                return
+            switch newSource {
+            case .orionProfile:
+                guard let url = OrionImporter.defaultFavouritesURL() else {
+                    // No profile: not a failure. Nothing is loaded and the
+                    // drop-target empty state takes over.
+                    source = nil
+                    allBookmarks = []
+                    sourceSummary = nil
+                    phase = .idle
+                    return
+                }
+                let imported = try OrionImporter.importFavourites(at: url)
+                allBookmarks = imported.parse.bookmarks
+                sourceSummary = SourceSummary(
+                    bookmarkCount: imported.summary.bookmarkCount,
+                    orphanedFolderReferences: imported.summary.orphanedFolderReferences
+                )
+            case .file(let url):
+                // Parse only, exactly like the CLI: read the bytes, never write to
+                // the file, never fetch anything a bookmark points at.
+                let html = try String(contentsOf: url, encoding: .utf8)
+                let parse = NetscapeBookmarkParser().parse(html)
+                guard !parse.bookmarks.isEmpty else { throw ImportError(file: url) }
+                allBookmarks = parse.bookmarks
+                sourceSummary = SourceSummary(bookmarkCount: parse.bookmarks.count)
             }
-            let imported = try OrionImporter.importFavourites(at: url)
-            allBookmarks = imported.parse.bookmarks
-            summary = imported.summary
+
+            // Only now, with the new source actually readable, does the confirmed
+            // replacement throw the old run away — a failed import must not.
+            if discardingSession { SessionStore.clear() }
 
             let taxonomy = try Self.loadPinnedTaxonomy()
             pinnedTaxonomy = taxonomy
@@ -212,10 +345,21 @@ final class OrganizerModel {
                 taxonomy.folders.map { ($0.name, $0.rationale) },
                 uniquingKeysWith: { first, _ in first }
             )
+            // Ids are content-derived, so this restores a file-sourced snapshot by
+            // the same rule as an Orion one: matching ids come back, the rest count
+            // as drift. Note that launch still scans Orion first, so a file run is
+            // only fully restored once its file is imported again.
             restoreSession()
             phase = .idle
         } catch {
             phase = .failed(String(describing: error))
+        }
+    }
+
+    private struct ImportError: Error, CustomStringConvertible {
+        let file: URL
+        var description: String {
+            "No bookmarks found in \(file.lastPathComponent). Expected a Netscape-format export, the file every browser's Export Bookmarks command writes."
         }
     }
 
@@ -447,7 +591,7 @@ final class OrganizerModel {
             copy.confidence = row.confidence
             return copy
         }
-        let url = URL.downloadsDirectory.appending(path: "rookmark-orion.organized.html")
+        let url = URL.downloadsDirectory.appending(path: "rookmark-\(exportStem).organized.html")
         try NetscapeBookmarkWriter().write(organized).write(to: url, atomically: true, encoding: .utf8)
         return url
     }
