@@ -1,11 +1,13 @@
 import AppKit
 import RookmarkKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Bindable var model: OrganizerModel
     @State private var exportedPath: String?
     @State private var settingsLinkFailed = false
+    @State private var isDropTargeted = false
 
     var body: some View {
         NavigationSplitView {
@@ -23,6 +25,33 @@ struct ContentView: View {
             // availability is re-read, never latched.
             model.refreshModelAvailability()
         }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            // Rejected while a run is going: returning false springs the drag back
+            // rather than silently discarding work.
+            guard !model.isBusy else { return false }
+            guard let provider = providers.first(where: {
+                $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+            }) else { return false }
+            provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in model.requestImport(from: url) }
+            }
+            return true
+        }
+        .confirmationDialog(
+            "Replace the run on screen?",
+            isPresented: Binding(
+                get: { model.pendingImport != nil },
+                set: { if !$0 { model.cancelImport() } }
+            ),
+            titleVisibility: .visible,
+            presenting: model.pendingImport
+        ) { url in
+            Button("Import \(url.lastPathComponent)", role: .destructive) { model.confirmImport() }
+            Button("Cancel", role: .cancel) { model.cancelImport() }
+        } message: { _ in
+            Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
+        }
     }
 
     // MARK: - Toolbar
@@ -35,6 +64,18 @@ struct ContentView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem {
             Button {
+                chooseFile()
+            } label: {
+                Label("Import a bookmarks HTML file", systemImage: "square.and.arrow.down")
+                    .labelStyle(.titleAndIcon)
+            }
+            .keyboardShortcut("o", modifiers: .command)
+            .disabled(model.isBusy)
+            .help("Load any browser's bookmarks export (.html or .htm). The file is only read, never modified.")
+        }
+
+        ToolbarItem {
+            Button {
                 Task { await model.organize() }
             } label: {
                 // Toolbar buttons default to icon-only on macOS, which left the
@@ -44,7 +85,7 @@ struct ContentView: View {
                     .labelStyle(.titleAndIcon)
             }
             .keyboardShortcut(.return)
-            .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty || !model.isModelAvailable)
+            .disabled(model.isBusy || model.remaining.isEmpty || !model.isModelAvailable)
             .help(model.remaining.isEmpty
                   ? "Every bookmark has a proposed folder."
                   : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
@@ -106,15 +147,19 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $model.selectedFolder) {
-            if let summary = model.summary {
+            if let summary = model.sourceSummary {
                 // Counts are formatted explicitly so they agree with each other;
                 // interpolating an Int into Text applies locale grouping while a
                 // pre-built String does not, which had 1687 sitting above 1.685.
                 Section {
+                    LabeledContent("Source", value: model.sourceName)
+                        .help(model.sourceName)   // full file name on hover if truncated
                     LabeledContent("Bookmarks", value: summary.bookmarkCount.formatted(.number))
-                    LabeledContent("Without a folder") {
-                        Text(summary.orphanedFolderReferences, format: .number)
-                            .foregroundStyle(summary.orphanedFolderReferences > 0 ? .orange : .secondary)
+                    if let orphaned = summary.orphanedFolderReferences {
+                        LabeledContent("Without a folder") {
+                            Text(orphaned, format: .number)
+                                .foregroundStyle(orphaned > 0 ? .orange : .secondary)
+                        }
                     }
                     LabeledContent("Taxonomy", value: "\(model.taxonomyFolderCount) folders")
                 }
@@ -227,9 +272,11 @@ struct ContentView: View {
         case .failed(let message):
             notice(message, systemImage: "exclamationmark.triangle", tint: .orange)
         case .scanning:
-            notice("Reading the Orion profile…", systemImage: "magnifyingglass")
+            notice(scanningTitle, systemImage: "magnifyingglass")
         case .classifying where model.rows.isEmpty, .finishing where model.rows.isEmpty:
             working
+        case .idle where model.source == nil:
+            dropTarget
         case .idle where model.rows.isEmpty:
             if case .unavailable = model.modelAvailability {
                 // Availability outranks the privacy blurb: Organize can't run,
@@ -250,6 +297,11 @@ struct ContentView: View {
                 footer
             }
         }
+    }
+
+    private var scanningTitle: String {
+        if case .file = model.source { return "Reading \(model.sourceName)…" }
+        return "Reading the Orion profile…"
     }
 
     private func notice(_ text: String, systemImage: String, tint: Color = .secondary) -> some View {
@@ -305,6 +357,88 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
     }
+
+    /// No source loaded yet. The drop is the primary action; the button and the
+    /// toolbar's Cmd+O are the keyboard-accessible equivalents.
+    private var dropTarget: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 30))
+                .foregroundStyle(.tint)
+
+            VStack(spacing: 6) {
+                Text("Drag a bookmarks export here, or")
+                Button("Choose a file…") { chooseFile() }
+                    .buttonStyle(.glass)
+            }
+            .font(.title3.weight(.medium))
+
+            Text("Any browser works: export your bookmarks as HTML and drop the file on this window. The file is only read, never modified.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Where the export lives").font(.caption.weight(.medium))
+                hint("Safari", "File ▸ Export Bookmarks")
+                hint("Chrome, Edge, Brave", "Bookmark Manager ▸ Export bookmarks")
+                hint("Firefox", "Manage Bookmarks ▸ Import and Backup ▸ Export Bookmarks to HTML")
+                Text("Orion's profile is read automatically when it's installed.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: 460, alignment: .leading)
+
+            if case .unavailable(let reason, _) = model.modelAvailability {
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(30)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(
+                    isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                )
+                .background(
+                    isDropTargeted ? Color.accentColor.opacity(0.08) : .clear,
+                    in: RoundedRectangle(cornerRadius: 14)
+                )
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    private func hint(_ browser: String, _ path: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("\(browser):").foregroundStyle(.primary)
+            Text(path)
+        }
+    }
+
+    /// Fallback for anyone without drag-and-drop. Accepts both spellings of the
+    /// extension: UTType.html covers .html, and .htm is appended dynamically when
+    /// the system maps it to a distinct type.
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Import a bookmarks HTML file"
+        panel.message = "Choose a bookmarks export in the Netscape HTML format."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = Self.htmlTypes
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.requestImport(from: url)
+    }
+
+    private static let htmlTypes: [UTType] = {
+        var types: [UTType] = [.html]
+        if let htm = UTType(filenameExtension: "htm"), htm != .html { types.append(htm) }
+        return types
+    }()
 
     /// Compact version when a table is on screen (restored or finished run):
     /// same information in the status-banner idiom, so review/export stay
