@@ -1,4 +1,4 @@
-# lazybm — Implementation Plan, Addendum: M9 & M10
+# rookmark — Implementation Plan, Addendum: M9 & M10
 
 Continuation of `ImplementationPlan.md` and `ImplementationPlan-M6-M8.md`. Two
 refinements driven by measured results on the 720-bookmark corpus:
@@ -274,7 +274,7 @@ Re-run the 720-bookmark corpus and record:
    automatically when CLI flags are `-1` (the default). Explicit `--embedder sentence`
    reproduces M9 behavior.
 
-4. **Asset gating works:** `lazybm doctor` reports backend + `modelID` + asset
+4. **Asset gating works:** `rookmark doctor` reports backend + `modelID` + asset
    state; `--download-assets` triggers both `requestAssets` and a warm `load()` so
    the first `organize` run doesn't pay the compilation cost.
 

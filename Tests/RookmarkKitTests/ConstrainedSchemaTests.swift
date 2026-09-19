@@ -1,7 +1,7 @@
 import Foundation
 import FoundationModels
 import Testing
-@testable import LazyBookmarksKit
+@testable import RookmarkKit
 
 @Suite("ConstrainedClassificationSchema")
 struct ConstrainedSchemaTests {

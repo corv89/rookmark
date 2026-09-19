@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 @testable import EvalKit
 
 @Suite("LabelStore")
@@ -91,14 +91,14 @@ struct SamplerTests {
     @Test("stratified sample returns up to n rows")
     func sampleSize() {
         let decisions = (0..<100).map { i in
-            LazyBookmarksKit.Classifier.Decision(
+            RookmarkKit.Classifier.Decision(
                 bookmarkID: "b\(i)",
                 folder: i % 3 == 0 ? "A" : (i % 3 == 1 ? "B" : "C"),
                 confidence: i
             )
         }
         let bookmarks = (0..<100).map { i in
-            LazyBookmarksKit.Bookmark(id: "b\(i)", title: "Title \(i)", url: "https://example.com/\(i)")
+            RookmarkKit.Bookmark(id: "b\(i)", title: "Title \(i)", url: "https://example.com/\(i)")
         }
         let rows = Sampler.stratifiedSample(decisions: decisions, bookmarks: bookmarks, n: 30, seed: 42)
         #expect(rows.count <= 30)

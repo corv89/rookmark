@@ -1,6 +1,6 @@
 import ArgumentParser
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 struct Worksheet: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

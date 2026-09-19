@@ -1,6 +1,6 @@
 import ArgumentParser
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 struct Dedup: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Find duplicate bookmarks.")
@@ -61,7 +61,7 @@ struct ImportCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "import",
         abstract: "Import an HTML export into the SQLite store.")
     @Argument var input: String
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         let html = try String(contentsOfFile: input, encoding: .utf8)
@@ -77,7 +77,7 @@ struct ExportCmd: AsyncParsableCommand {
         abstract: "Export the store back to Netscape HTML.")
     @Option(name: [.short, .customLong("output")]) var output: String?
     @Option var runID: Int64?
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         guard let id = runID else {
@@ -101,7 +101,7 @@ struct ListCmd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "list",
         abstract: "List stored bookmarks.")
     @Option var runID: Int64?
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         guard let id = runID else {
@@ -122,7 +122,7 @@ struct SearchCmd: AsyncParsableCommand {
         abstract: "Search stored bookmarks.")
     @Argument var query: String
     @Option var runID: Int64?
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         guard let id = runID else {
@@ -146,7 +146,7 @@ struct SearchCmd: AsyncParsableCommand {
 struct Undo: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Revert the last organize run.")
     @Option var runID: Int64?
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         guard let id = runID else {
@@ -161,7 +161,7 @@ struct Undo: AsyncParsableCommand {
 struct Status: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Show last-run summary and resume state.")
     @Option var runID: Int64?
-    @Option var db: String = "lazybm.sqlite"
+    @Option var db: String = "rookmark.sqlite"
     func run() async throws {
         let store = try Store(path: db)
         guard let id = runID else {

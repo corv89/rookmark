@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import LazyBookmarksKit
+@testable import RookmarkKit
 
 @Suite("Clusterer (no-model)")
 struct ClustererTests {

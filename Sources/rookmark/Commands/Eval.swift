@@ -1,6 +1,6 @@
 import ArgumentParser
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 import EvalKit
 
 struct Eval: AsyncParsableCommand {
@@ -172,7 +172,7 @@ struct EvalRun: AsyncParsableCommand {
             return Int(round(Double(m.unsortedTotal) / (1.0 - m.sortRate / 100.0)))
         } ?? 0
 
-        print("lazybm eval: \(runs) runs on \(input) (\(bookmarkCount) bookmarks)")
+        print("rookmark eval: \(runs) runs on \(input) (\(bookmarkCount) bookmarks)")
         print("")
         print(String(format: "%-20s%-10s%-10s%-10s%-10s%-10s", "Metric", "Mean", "StdDev", "Min", "Max", "Range"))
         print(String(repeating: "\u{2500}", count: 65))

@@ -72,12 +72,12 @@
        fetched_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
    )
    ```
-2. Create `Enrichment` model in `Sources/LazyBookmarksKit/Model/Enrichment.swift`
+2. Create `Enrichment` model in `Sources/RookmarkKit/Model/Enrichment.swift`
 3. Add cache methods to `Store.swift`: `getEnrichment()`, `setEnrichment()`, `clearEnrichments()`
 4. Test table creation, round-trip serialization, cache hit/miss
 
 ### Phase 3: ContentEnricher Module (4 hours)
-1. Create `ContentEnricher` actor in `Sources/LazyBookmarksKit/Enrichment/ContentEnricher.swift`
+1. Create `ContentEnricher` actor in `Sources/RookmarkKit/Enrichment/ContentEnricher.swift`
 2. Implement meta tag extraction with priority order (og → twitter → description → body)
 3. Implement dead link detection (HTTP status, timeout, DNS failure)
 4. Implement fetch strategy: 5 concurrent requests, 15s timeout, 1 retry
@@ -153,7 +153,7 @@
 
 ### First Run (with Download)
 ```bash
-$ lazybm organize bookmarks.html
+$ rookmark organize bookmarks.html
 
 Contextual embedding model not downloaded. Download now? (Y/N) [~500MB] Y
 
@@ -173,7 +173,7 @@ Output: bookmarks.organized.html
 
 ### Subsequent Run (with Cache)
 ```bash
-$ lazybm organize bookmarks.html
+$ rookmark organize bookmarks.html
 
 Enriching bookmarks... 720/720 ✅ (all cached)
 

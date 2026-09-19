@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 public struct SweepResult: Sendable {
     public var paramName: String

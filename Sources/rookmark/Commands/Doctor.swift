@@ -1,5 +1,5 @@
 import ArgumentParser
-import LazyBookmarksKit
+import RookmarkKit
 
 struct Doctor: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

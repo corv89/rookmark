@@ -1,9 +1,9 @@
 import ArgumentParser
 
 @main
-struct LazyBM: AsyncParsableCommand {
+struct Rookmark: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "lazybm",
+        commandName: "rookmark",
         abstract: "Organize a browser bookmark export into topic folders using the macOS on-device model.",
         subcommands: [
             Organize.self,

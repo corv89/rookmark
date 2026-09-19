@@ -1,6 +1,6 @@
 import Testing
 @testable import EvalKit
-import LazyBookmarksKit
+import RookmarkKit
 
 @Suite("ClassificationMetrics")
 struct ClassificationMetricsTests {

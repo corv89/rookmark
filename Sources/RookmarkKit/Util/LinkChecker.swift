@@ -37,7 +37,7 @@ public struct LinkChecker: Sendable {
             var request = URLRequest(url: url)
             request.httpMethod = method
             request.timeoutInterval = 15
-            request.setValue("lazybm/1.0", forHTTPHeaderField: "User-Agent")
+            request.setValue("rookmark/1.0", forHTTPHeaderField: "User-Agent")
 
             let config = URLSessionConfiguration.default
             config.httpMaximumConnectionsPerHost = 1

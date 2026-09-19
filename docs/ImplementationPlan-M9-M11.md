@@ -1,4 +1,4 @@
-# lazybm — Implementation Plan: M9–M11 (Refinement & Hardening)
+# rookmark — Implementation Plan: M9–M11 (Refinement & Hardening)
 
 Self-contained handoff for a coding agent. Supersedes
 `ImplementationPlan-M9-M10.md`. Builds on the merged base (M0–M8, plus M6
@@ -75,7 +75,7 @@ instead of regenerating — removes the cascade (source 2) for re-runs. Add
 known-good taxonomy and isolate classification variance.
 
 ### M11.4 — Variance harness
-Dev command `lazybm eval --runs N <input.html>` (default N = 5, gated on
+Dev command `rookmark eval --runs N <input.html>` (default N = 5, gated on
 availability): runs the corpus N times and reports mean ± stddev (and min/max) of
 sort rate, folder count, and the Unsorted-cause split. Run before/after
 M11.1–M11.3 to confirm the collapse and quantify the residual ANE floor.
@@ -84,7 +84,7 @@ M11.1–M11.3 to confirm the collapse and quantify the residual ANE floor.
 ```
 SessionFactory: deterministic GenerationOptions by default (temp 0 / greedy)
 CLI (organize):  --reuse-taxonomy <runID> | --taxonomy-from <path>
-dev:             lazybm eval --runs N <input.html>
+dev:             rookmark eval --runs N <input.html>
 ```
 
 ## Tests
@@ -238,7 +238,7 @@ enum EmbedderFactory {
   static func make(preferred: String) async -> BookmarkEmbedder?
   // "sentence" (DEFAULT) → SentenceEmbedder
   // "contextual"         → ContextualEmbedder if assets ready,
-  //                        else fail fast: "run lazybm doctor --download-assets"
+  //                        else fail fast: "run rookmark doctor --download-assets"
 }
 ```
 No silent auto-upgrade to contextual — it is opt-in only.
@@ -273,7 +273,7 @@ Report the selected embedder and `modelID`. `doctor --download-assets` is a
 force first-run compilation) so `organize` never pays it mid-run; show an
 indeterminate "preparing embedding model…" heartbeat (no percentage unless a
 `Progress` is exposed). With `--embedder contextual`, `organize` **fails fast**
-("run `lazybm doctor --download-assets`") when assets/compilation aren't ready.
+("run `rookmark doctor --download-assets`") when assets/compilation aren't ready.
 
 ## Config
 ```
@@ -332,14 +332,14 @@ longer appears — it no longer exists.
 # Consolidated CLI surface (after M9–M11)
 
 ```
-lazybm organize <in.html> [-o out]
+rookmark organize <in.html> [-o out]
         [--fresh] [--stateful] [--batch-size N]
         [--confidence-floor N]                 # M9.4 (default 15)
         [--embedder {sentence|contextual}]     # M10  (default sentence)
         [--cluster-threshold D] [--merge-threshold D]   # M10.7
         [--folder-language BCP-47]             # M10.8
         [--reuse-taxonomy <runID> | --taxonomy-from <path>]   # M11.3
-lazybm doctor [--download-assets]              # M10.9 (contextual only)
-lazybm eval --runs N <in.html>                 # M11.4 (dev/variance harness)
-lazybm import|export|list|search|undo|status|dedup|check-links   # existing
+rookmark doctor [--download-assets]              # M10.9 (contextual only)
+rookmark eval --runs N <in.html>                 # M11.4 (dev/variance harness)
+rookmark import|export|list|search|undo|status|dedup|check-links   # existing
 ```

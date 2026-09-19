@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 public struct LocalLLMJudge: Sendable {
     public var baseURL: String

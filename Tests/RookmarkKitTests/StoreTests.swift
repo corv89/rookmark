@@ -1,12 +1,12 @@
 import Foundation
 import Testing
-@testable import LazyBookmarksKit
+@testable import RookmarkKit
 
 @Suite("Store")
 struct StoreTests {
 
     func makeStore() throws -> Store {
-        let path = NSTemporaryDirectory() + "lazybm_test_\(UUID().uuidString).sqlite"
+        let path = NSTemporaryDirectory() + "rookmark_test_\(UUID().uuidString).sqlite"
         return try Store(path: path)
     }
 

@@ -1,4 +1,4 @@
-# lazybm — Implementation Plan
+# rookmark — Implementation Plan
 
 A macOS CLI that reorganizes a browser bookmark **HTML export** into sensible,
 topic-based folders using the **on-device Foundation Models** LLM bundled with
@@ -67,24 +67,24 @@ Three consequences drive every design decision:
 - **Language/build:** Swift 6, SwiftPM, `swift build` (no `.xcodeproj`; Zed-friendly).
 - **CLI:** `swift-argument-parser`.
 - **Storage:** SQLite via **GRDB.swift** (stateful mode only).
-- **LLM:** `FoundationModels` (only `LazyBookmarksKit` imports it).
+- **LLM:** `FoundationModels` (only `RookmarkKit` imports it).
 - **No shell-outs anywhere** — link checking uses `URLSession` + structured concurrency.
 
 ```
-lazybm/
+rookmark/
 ├── Package.swift                         platforms: [.macOS("26.0")]
 ├── Sources/
-│   ├── lazybm/                           CLI only (no domain logic)
-│   │   ├── LazyBM.swift                  root command
+│   ├── rookmark/                           CLI only (no domain logic)
+│   │   ├── Rookmark.swift                  root command
 │   │   └── Commands/{Organize,Doctor,Stubs}.swift
-│   └── LazyBookmarksKit/                 testable core
+│   └── RookmarkKit/                 testable core
 │       ├── Model/Bookmark.swift          Bookmark, ParseResult, Taxonomy
 │       ├── Parsing/NetscapeBookmark{Parser,Writer}.swift
 │       ├── LLM/{SessionFactory,TokenBudget,Schemas}.swift
 │       ├── Pipeline/{TaxonomyBuilder,Classifier,Organizer}.swift
 │       ├── Store/Store.swift             GRDB (stub)
 │       └── Util/{URLNormalizer,LinkChecker}.swift
-└── Tests/LazyBookmarksKitTests/
+└── Tests/RookmarkKitTests/
 ```
 
 ## 5. Data flow

@@ -1,5 +1,5 @@
 import XCTest
-@testable import LazyBookmarksKit
+@testable import RookmarkKit
 
 final class OrionImporterTests: XCTestCase {
 

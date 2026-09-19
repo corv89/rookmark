@@ -1,6 +1,6 @@
 import ArgumentParser
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 struct Organize: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -182,7 +182,7 @@ struct Organize: AsyncParsableCommand {
                 }
             )
         } catch Organizer.Error.contextualEmbedderUnavailable {
-            throw ValidationError("Contextual embedder not available. Run: lazybm doctor --download-assets")
+            throw ValidationError("Contextual embedder not available. Run: rookmark doctor --download-assets")
         }
 
         let out = output ?? (input as NSString).deletingPathExtension + ".organized.html"

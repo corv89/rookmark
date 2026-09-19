@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 public struct ClassificationMetrics: Sendable, Equatable {
     public var total: Int

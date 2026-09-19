@@ -1,4 +1,4 @@
-# lazybm — Implementation Plan, Addendum: M6 & M8
+# rookmark — Implementation Plan, Addendum: M6 & M8
 
 Continuation of `ImplementationPlan.md`. Covers the two deferred milestones now
 that M0–M5 + M7 are merged (`swift build` clean, 46 tests green). Same

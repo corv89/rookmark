@@ -122,7 +122,7 @@ public actor ContentEnricher {
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
             request.timeoutInterval = 15
-            request.setValue("lazybm/1.0 (+https://github.com/lazybm)", forHTTPHeaderField: "User-Agent")
+            request.setValue("rookmark/1.0 (+https://github.com/rookmark)", forHTTPHeaderField: "User-Agent")
             request.setValue("text/html", forHTTPHeaderField: "Accept")
 
             let sessionConfig = URLSessionConfiguration.default

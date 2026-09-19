@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 @main
-struct SwiftmarksApp: App {
-    @State private var model = DemoModel()
+struct RookmarkApp: App {
+    @State private var model = OrganizerModel()
 
     var body: some Scene {
-        WindowGroup("Swiftmarks") {
+        WindowGroup("Rookmark") {
             ContentView(model: model)
                 .frame(minWidth: 820, minHeight: 560)
                 .task {

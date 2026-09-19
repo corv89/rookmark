@@ -1,9 +1,9 @@
 import AppKit
-import LazyBookmarksKit
+import RookmarkKit
 import SwiftUI
 
 struct ContentView: View {
-    @Bindable var model: DemoModel
+    @Bindable var model: OrganizerModel
     @State private var exportedPath: String?
 
     var body: some View {
@@ -21,7 +21,7 @@ struct ContentView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Swiftmarks")
+                Text("Rookmark")
                     .font(.largeTitle.weight(.semibold))
                 Text("on-device bookmark organizer")
                     .font(.callout)
@@ -118,7 +118,7 @@ struct ContentView: View {
 
             if !model.rows.isEmpty {
                 Picker("", selection: $model.sort) {
-                    ForEach(DemoModel.Sort.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(OrganizerModel.Sort.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 140)
@@ -145,7 +145,7 @@ struct ContentView: View {
             working
         case .idle where model.rows.isEmpty:
             notice(
-                "Nothing leaves this Mac. Classification runs against the on-device model, and your browser's bookmarks are never modified. Swiftmarks only ever writes a new file.",
+                "Nothing leaves this Mac. Classification runs against the on-device model, and your browser's bookmarks are never modified. Rookmark only ever writes a new file.",
                 systemImage: "lock.laptopcomputer"
             )
         default:
@@ -274,7 +274,7 @@ struct ContentView: View {
         .frame(minHeight: 200)
     }
 
-    private func judgeButton(_ row: DemoModel.Row, accepted: Bool, systemImage: String, tint: Color) -> some View {
+    private func judgeButton(_ row: OrganizerModel.Row, accepted: Bool, systemImage: String, tint: Color) -> some View {
         Button {
             model.judge(row.id, accepted: accepted)
         } label: {

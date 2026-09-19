@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 import CryptoKit
 
 public struct Baseline: Codable, Sendable {

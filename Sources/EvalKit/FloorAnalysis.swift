@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 public struct ConfidenceBin: Sendable, Equatable {
     public var floor: Int

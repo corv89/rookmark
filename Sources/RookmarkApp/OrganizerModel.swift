@@ -1,10 +1,10 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 import Observation
 
 @MainActor
 @Observable
-final class DemoModel {
+final class OrganizerModel {
 
     struct Row: Identifiable {
         let id: String
@@ -281,7 +281,7 @@ final class DemoModel {
             copy.confidence = row.confidence
             return copy
         }
-        let url = URL.downloadsDirectory.appending(path: "swiftmarks-orion.organized.html")
+        let url = URL.downloadsDirectory.appending(path: "rookmark-orion.organized.html")
         try NetscapeBookmarkWriter().write(organized).write(to: url, atomically: true, encoding: .utf8)
         return url
     }

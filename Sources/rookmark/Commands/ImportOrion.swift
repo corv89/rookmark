@@ -1,6 +1,6 @@
 import ArgumentParser
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 struct ImportOrion: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -48,6 +48,6 @@ struct ImportOrion: AsyncParsableCommand {
         let html = NetscapeBookmarkWriter().write(result.parse.bookmarks)
         try html.write(to: URL(filePath: path), atomically: true, encoding: .utf8)
         print("\nWrote \(result.parse.bookmarks.count) bookmarks to \(path)")
-        print("Next: lazybm organize \(path) --taxonomy-from tuning/consolidated-taxonomy-v5.json --cluster --no-enrich")
+        print("Next: rookmark organize \(path) --taxonomy-from tuning/consolidated-taxonomy-v5.json --cluster --no-enrich")
     }
 }

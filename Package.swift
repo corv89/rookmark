@@ -1,19 +1,19 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// lazybm — CLI bookmark organizer powered by the macOS-bundled on-device
+// rookmark — CLI bookmark organizer powered by the macOS-bundled on-device
 // Foundation Models LLM. macOS 26+ / Apple Silicon ONLY: the FoundationModels
 // framework is not available on Linux or Intel Macs, so there is intentionally
 // no other platform/architecture in this matrix.
 let package = Package(
-    name: "lazybm",
+    name: "rookmark",
     platforms: [
         .macOS("26.0")
     ],
     products: [
-        .executable(name: "lazybm", targets: ["lazybm"]),
-        .executable(name: "Swiftmarks", targets: ["Swiftmarks"]),
-        .library(name: "LazyBookmarksKit", targets: ["LazyBookmarksKit"]),
+        .executable(name: "rookmark", targets: ["rookmark"]),
+        .executable(name: "RookmarkApp", targets: ["RookmarkApp"]),
+        .library(name: "RookmarkKit", targets: ["RookmarkKit"]),
         .library(name: "EvalKit", targets: ["EvalKit"]),
     ],
     dependencies: [
@@ -22,48 +22,49 @@ let package = Package(
     ],
     targets: [
         // Thin CLI layer. Holds zero domain logic — only argument parsing and
-        // wiring into LazyBookmarksKit so the core stays unit-testable.
+        // wiring into RookmarkKit so the core stays unit-testable.
         .executableTarget(
-            name: "lazybm",
+            name: "rookmark",
             dependencies: [
-                "LazyBookmarksKit",
+                "RookmarkKit",
                 "EvalKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/lazybm"
+            path: "Sources/rookmark"
         ),
         // Testable core. The only target that imports FoundationModels.
         .target(
-            name: "LazyBookmarksKit",
+            name: "RookmarkKit",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
-            path: "Sources/LazyBookmarksKit",
+            path: "Sources/RookmarkKit",
             linkerSettings: [
                 .linkedFramework("NaturalLanguage"),
                 .linkedFramework("FoundationModels"),
             ]
         ),
-        // SwiftUI demo shell. Deliberately a SwiftPM executable rather than an
-        // Xcode app project: it runs unsandboxed via `swift run`, which is what
-        // lets it read another browser's profile without entitlements.
+        // SwiftUI app. Deliberately a SwiftPM executable rather than an Xcode
+        // app project: it runs unsandboxed, which is what lets it read another
+        // browser's profile without entitlements. The App Store would require
+        // sandboxing and cost exactly that capability.
         .executableTarget(
-            name: "Swiftmarks",
-            dependencies: ["LazyBookmarksKit"],
-            path: "Sources/Swiftmarks"
+            name: "RookmarkApp",
+            dependencies: ["RookmarkKit"],
+            path: "Sources/RookmarkApp"
         ),
         .target(
             name: "EvalKit",
             dependencies: [
-                "LazyBookmarksKit",
+                "RookmarkKit",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Sources/EvalKit"
         ),
         .testTarget(
-            name: "LazyBookmarksKitTests",
-            dependencies: ["LazyBookmarksKit"],
-            path: "Tests/LazyBookmarksKitTests"
+            name: "RookmarkKitTests",
+            dependencies: ["RookmarkKit"],
+            path: "Tests/RookmarkKitTests"
         ),
         .testTarget(
             name: "EvalKitTests",

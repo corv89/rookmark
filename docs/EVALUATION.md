@@ -1,6 +1,6 @@
-# lazybm — Evaluation & Tuning (single-corpus regimen)
+# rookmark — Evaluation & Tuning (single-corpus regimen)
 
-Handoff for the agent. Extends the existing `lazybm eval` command (M11.4) into a
+Handoff for the agent. Extends the existing `rookmark eval` command (M11.4) into a
 proper evaluation + default-tuning harness. Written for the current reality of
 **one labeled corpus** (the ~720-bookmark export); §2 is the constraint that
 shapes everything else. Conventions: **AC** = acceptance criteria, **VERIFY** =
@@ -106,24 +106,24 @@ the rest.
 Extend the existing command; storage in the run DB.
 
 ```
-lazybm eval run    --runs N <corpus>                 # existing variance harness
-lazybm eval sample <corpus> [--n 200] [--strata folder,confidence,lang]
+rookmark eval run    --runs N <corpus>                 # existing variance harness
+rookmark eval sample <corpus> [--n 200] [--strata folder,confidence,lang]
                                                      # emit stratified labeling worksheet (CSV/JSON)
-lazybm eval import-labels <file>                     # ingest human accept/reject
-lazybm eval judge  <corpus> --labels <file> [--judge {none|local|cloud}]
+rookmark eval import-labels <file>                     # ingest human accept/reject
+rookmark eval judge  <corpus> --labels <file> [--judge {none|local|cloud}]
                                                      # calibrate (report κ) then scale; default none
-lazybm eval metrics <corpus> [--pin-taxonomy <runID>]
+rookmark eval metrics <corpus> [--pin-taxonomy <runID>]
                                                      # all §3 metrics + bootstrap CIs
-lazybm eval sweep  --param <name> --values a,b,c [--pin-taxonomy <runID>] <corpus>
+rookmark eval sweep  --param <name> --values a,b,c [--pin-taxonomy <runID>] <corpus>
                                                      # per-value coverage/precision/yield + paired-bootstrap vs baseline
-lazybm eval kfold  --folds 5 --pin-taxonomy <runID> <corpus>
+rookmark eval kfold  --folds 5 --pin-taxonomy <runID> <corpus>
                                                      # rotate validation fold; mean held-out yield ± sd
-lazybm eval subsample --fraction 0.7 --trials 10 <corpus>
+rookmark eval subsample --fraction 0.7 --trials 10 <corpus>
                                                      # stability of metrics + taxonomy (Jaccard of folder sets)
-lazybm eval calib  --pin-taxonomy <runID> <corpus>  # precision-per-confidence-bin reliability curve
+rookmark eval calib  --pin-taxonomy <runID> <corpus>  # precision-per-confidence-bin reliability curve
 ```
 A `Metrics` module computes everything; `eval` subcommands are thin shells over
-it (keep it testable, mirroring `LazyBookmarksKit`).
+it (keep it testable, mirroring `RookmarkKit`).
 
 ## 6. Tuning plan (which method per parameter)
 

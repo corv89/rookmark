@@ -1,5 +1,5 @@
 import Testing
-@testable import LazyBookmarksKit
+@testable import RookmarkKit
 
 @Suite("Classifier (no-model)")
 struct ClassifierTests {

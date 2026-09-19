@@ -1,5 +1,5 @@
 import Foundation
-import LazyBookmarksKit
+import RookmarkKit
 
 public struct SubsampleResult: Sendable {
     public var trial: Int
