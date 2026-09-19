@@ -51,7 +51,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>MIT licensed</string>
+    <key>NSHumanReadableCopyright</key><string>GPLv3 licensed</string>
 </dict>
 </plist>
 PLIST

@@ -7,85 +7,81 @@ struct ContentView: View {
     @State private var exportedPath: String?
 
     var body: some View {
-        // Deliberately not NavigationSplitView with a native toolbar. That route
-        // gives Liquid Glass for free, but the detail list rendered up underneath
-        // the toolbar and safe-area insets stopped laying out, so the controls
-        // live in the window and carry the glass themselves.
-        VStack(spacing: 0) {
-            controlBar
-            statusBanner
-            Divider()
-            HStack(spacing: 0) {
-                sidebar
-                Divider()
-                detail
-            }
+        NavigationSplitView {
+            sidebar
+        } detail: {
+            // The floor goes on the detail column, not the window root: a frame
+            // wrapped around the whole hierarchy stops the toolbar's safe area
+            // reaching the scroll views, which renders rows under the toolbar.
+            detail.frame(minWidth: 620, minHeight: 420)
         }
+        .toolbar { toolbarContent }
+        .searchable(text: $model.search, prompt: "Search titles and URLs")
     }
 
-    // MARK: - Controls
+    // MARK: - Toolbar
+    //
+    // Plain buttons: on macOS 26 the toolbar renders its own Liquid Glass behind
+    // items, so styling them with .glass as well double-stacks the material.
+    // ToolbarSpacer is what splits items into separate glass groups.
 
-    private var controlBar: some View {
-        HStack(spacing: 12) {
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
             Button {
                 Task { await model.organize() }
             } label: {
                 Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
             }
-            .buttonStyle(.glassProminent)
             .keyboardShortcut(.return)
             .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty)
             .help(model.remaining.isEmpty
                   ? "Every bookmark has a proposed folder."
                   : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
+        }
 
-            if model.isBusy {
-                runStatus
+        if model.isBusy {
+            ToolbarItem { runStatus }
+            ToolbarItem {
                 Button("Pause") { model.pause() }
-                    .buttonStyle(.glass)
                     .help("Stop after the current batch. Resume picks up where it left off.")
-            } else if !model.remaining.isEmpty, !model.rows.isEmpty {
-                // Pre-formatted, then interpolated as a String. Interpolating an
-                // Int straight into Text goes through LocalizedStringKey, which
-                // applied different grouping than .formatted did in the sidebar
-                // and left 1.673 sitting next to 1,687.
+            }
+        } else if !model.rows.isEmpty, !model.remaining.isEmpty {
+            ToolbarItem {
                 Text("\(model.remaining.count.formatted(.number)) left · ~\(minutes(model.estimatedSeconds))")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else if !model.remaining.isEmpty {
-                Text("~\(minutes(model.estimatedSeconds))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
+        }
 
-            Spacer()
+        ToolbarSpacer(.flexible)
 
-            if !model.rows.isEmpty {
-                Picker(selection: $model.sort) {
-                    ForEach(OrganizerModel.Sort.allCases) { Text($0.rawValue).tag($0) }
+        if !model.rows.isEmpty {
+            ToolbarItem {
+                // A Picker in a toolbar renders as an empty control; a Menu of
+                // Toggles shows the current choice and the checkmark beside it.
+                Menu {
+                    ForEach(OrganizerModel.Sort.allCases) { option in
+                        Toggle(option.rawValue, isOn: Binding(
+                            get: { model.sort == option },
+                            set: { _ in model.sort = option }
+                        ))
+                    }
                 } label: {
-                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                    Label(model.sort.rawValue, systemImage: "arrow.up.arrow.down")
                 }
-                .pickerStyle(.menu)
-                .fixedSize()
                 .help("Sort order")
-
-                TextField("Search", text: $model.search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 170)
-
+            }
+            ToolbarItem {
                 Button {
                     exportedPath = try? model.exportOrganized().path(percentEncoded: false)
                 } label: {
                     Label("Export a copy", systemImage: "square.and.arrow.up")
                 }
-                .buttonStyle(.glass)
                 .disabled(model.acceptedCount == 0)
                 .help("Write a new bookmarks file. Your browser is never modified.")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
     }
 
     @ViewBuilder
@@ -157,7 +153,7 @@ struct ContentView: View {
             }
         }
         .listStyle(.sidebar)
-        .frame(width: 230)
+        .navigationSplitViewColumnWidth(min: 210, ideal: 235, max: 300)
     }
 
     private func folderRow(name: String, count: Int, tag: String) -> some View {
@@ -194,6 +190,7 @@ struct ContentView: View {
             )
         default:
             VStack(spacing: 0) {
+                statusBanner
                 resultsTable
                 if model.selectedRow != nil { inspector }
                 footer

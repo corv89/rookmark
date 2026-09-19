@@ -17,16 +17,27 @@ struct RookmarkApp: App {
     var body: some Scene {
         WindowGroup("Rookmark") {
             ContentView(model: model)
-                .frame(minWidth: 820, minHeight: 560)
                 .task {
-                    // Launched from a terminal via `swift run`, the process is not
-                    // a foreground app until it asks to be.
-                    NSApp.setActivationPolicy(.regular)
-                    NSApp.applicationIconImage = Self.appIcon
-                    NSApp.activate(ignoringOtherApps: true)
+                    // Only needed when run as a bare executable via `swift run`:
+                    // without a bundle the process starts as an accessory and
+                    // never comes to the front. A bundled launch is already
+                    // .regular, and calling this after the window exists is what
+                    // is suspected of disturbing toolbar safe-area setup.
+                    if Bundle.main.bundleIdentifier == nil {
+                        NSApp.setActivationPolicy(.regular)
+                        NSApp.applicationIconImage = Self.appIcon
+                        NSApp.activate()
+                    }
                     await model.scan()
                 }
         }
+        // Minimum size belongs to the scene. Putting a .frame on the root view
+        // wraps the whole hierarchy in a fixed-size container, which stops the
+        // toolbar's safe area reaching the scroll views inside it.
+        .defaultSize(width: 1180, height: 760)
+        // .contentSize would grow the window to whatever the list wants, which
+        // opened it several thousand points tall. .contentMinSize keeps the user
+        // in charge of the size and only enforces a floor.
         .windowResizability(.contentMinSize)
     }
 
