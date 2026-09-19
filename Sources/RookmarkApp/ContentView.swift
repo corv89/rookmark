@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var exportedPath: String?
     @State private var settingsLinkFailed = false
     @State private var isDropTargeted = false
+    @State private var isEditingFolders = false
 
     var body: some View {
         NavigationSplitView {
@@ -217,7 +218,15 @@ struct ContentView: View {
                                 .foregroundStyle(orphaned > 0 ? .orange : .secondary)
                         }
                     }
-                    LabeledContent("Taxonomy", value: "\(model.taxonomyFolderCount) folders")
+                    HStack {
+                        LabeledContent("Taxonomy", value: "\(model.taxonomyFolderCount) folders")
+                        Spacer()
+                        Button("Edit folders…") { isEditingFolders = true }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .disabled(model.isBusy)
+                            .help("Rename, add, delete, or merge folders. Applies to this run only; the bundled defaults are never modified.")
+                    }
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -240,6 +249,9 @@ struct ContentView: View {
             }
         }
         .listStyle(.sidebar)
+        .sheet(isPresented: $isEditingFolders) {
+            TaxonomyEditorSheet(model: model)
+        }
         .navigationSplitViewColumnWidth(min: 210, ideal: 235, max: 300)
     }
 
@@ -778,6 +790,232 @@ struct ContentView: View {
         var hash = 5381
         for byte in folder.utf8 { hash = (hash &* 33) &+ Int(byte) }
         return palette[abs(hash) % palette.count]
+    }
+}
+
+/// In-GUI editing of the run's folder list. Deliberately plain List/Form in a
+/// sheet: rename, add, delete, merge — each a direct call on the model, which
+/// validates and reports rejections as a one-line footnote rather than an
+/// alert. Edits land in the working copy and the session snapshot; the
+/// bundled taxonomy file is never written.
+private struct TaxonomyEditorSheet: View {
+    let model: OrganizerModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var renameTarget: String?
+    @State private var renameDraft = ""
+    @State private var renameRationaleDraft = ""
+    @State private var addName = ""
+    @State private var addRationale = ""
+    @State private var isAdding = false
+    @State private var deleteTarget: String?
+    @State private var editError: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(model.workingFolders, id: \.name) { folder in
+                        folderRow(folder)
+                    }
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if model.isTaxonomyOversized {
+                            // Warned, never blocked: the kit prunes at its own
+                            // runtime ceiling regardless.
+                            Label(
+                                "\(model.workingFolders.count) folders ride along in every classification batch — a list this long shrinks the batch and slows the run.",
+                                systemImage: "exclamationmark.triangle.fill"
+                            )
+                            .foregroundStyle(.orange)
+                        }
+                        Text("Unsorted always exists and cannot be renamed or deleted; deleted folders' bookmarks go there.")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                errorFootnote
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.bar)
+            }
+            .navigationTitle("Edit Folders")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add Folder") {
+                        addName = ""
+                        addRationale = ""
+                        editError = nil
+                        isAdding = true
+                    }
+                }
+            }
+            .frame(minWidth: 380, minHeight: 340)
+            .sheet(isPresented: $isAdding) { addSheet }
+            .sheet(isPresented: Binding(
+                get: { renameTarget != nil },
+                set: { if !$0 { closeRename() } }
+            )) {
+                renameSheet
+            }
+            .confirmationDialog(
+                deleteTarget.map { "Delete “\($0)”?" } ?? "Delete folder?",
+                isPresented: Binding(
+                    get: { deleteTarget != nil },
+                    set: { if !$0 { deleteTarget = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Folder", role: .destructive) {
+                    if let target = deleteTarget {
+                        perform { try model.deleteFolder(target) }
+                    }
+                    deleteTarget = nil
+                }
+                Button("Cancel", role: .cancel) { deleteTarget = nil }
+            } message: {
+                // The consequence, spelled out before the irreversible act.
+                Text("\(count(of: deleteTarget ?? "")) bookmark(s) will move to \(Taxonomy.unsorted).")
+            }
+        }
+    }
+
+    private func folderRow(_ folder: Taxonomy.Folder) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(folder.name)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                if !folder.rationale.isEmpty {
+                    Text(folder.rationale)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("\(count(of: folder.name))")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .help("\(count(of: folder.name)) bookmarks filed here")
+            Menu {
+                Button("Rename…") { openRename(folder) }
+                Menu("Merge into") {
+                    ForEach(model.workingFolders.filter { $0.name != folder.name }, id: \.name) { other in
+                        Button(other.name) {
+                            perform { try model.mergeFolder(folder.name, into: other.name) }
+                        }
+                    }
+                }
+                Divider()
+                Button("Delete…", role: .destructive) { deleteTarget = folder.name }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.borderless)
+            .fixedSize()
+            .help("Rename, merge, or delete this folder")
+        }
+    }
+
+    private var addSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $addName)
+                    TextField("Rationale (optional)", text: $addRationale)
+                } footer: {
+                    errorFootnote
+                }
+            }
+            .navigationTitle("Add Folder")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isAdding = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        perform { try model.addFolder(named: addName, rationale: addRationale) }
+                        if editError == nil { isAdding = false }
+                    }
+                    .disabled(addName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .frame(minWidth: 320)
+        }
+    }
+
+    private var renameSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $renameDraft)
+                    TextField("Rationale", text: $renameRationaleDraft)
+                } footer: {
+                    errorFootnote
+                }
+            }
+            .navigationTitle("Edit Folder")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { closeRename() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard let target = renameTarget else { return }
+                        perform {
+                            try model.updateFolder(target, to: renameDraft, rationale: renameRationaleDraft)
+                        }
+                        if editError == nil { closeRename() }
+                    }
+                    .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .frame(minWidth: 320)
+        }
+    }
+
+    private func openRename(_ folder: Taxonomy.Folder) {
+        renameTarget = folder.name
+        renameDraft = folder.name
+        renameRationaleDraft = folder.rationale
+        editError = nil
+    }
+
+    private func closeRename() {
+        renameTarget = nil
+        renameDraft = ""
+        renameRationaleDraft = ""
+    }
+
+    private func count(of name: String) -> Int {
+        model.rows.filter { $0.folder == name }.count
+    }
+
+    /// Runs one model edit, turning a rejection into the sheet's red footnote.
+    /// A passed edit clears any previous failure.
+    private func perform(_ edit: () throws -> Void) {
+        do {
+            editError = nil
+            try edit()
+        } catch {
+            editError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        }
+    }
+
+    @ViewBuilder
+    private var errorFootnote: some View {
+        if let editError {
+            Text(editError)
+                .font(.footnote)
+                .foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
