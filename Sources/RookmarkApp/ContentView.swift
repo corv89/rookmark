@@ -31,7 +31,11 @@ struct ContentView: View {
             Button {
                 Task { await model.organize() }
             } label: {
+                // Toolbar buttons default to icon-only on macOS, which left the
+                // action unlabelled while the status text beside it shared the
+                // same glass capsule and read as overflow from the button.
                 Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
+                    .labelStyle(.titleAndIcon)
             }
             .keyboardShortcut(.return)
             .disabled(model.isBusy || model.summary == nil || model.remaining.isEmpty)
@@ -40,17 +44,14 @@ struct ContentView: View {
                   : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
         }
 
+        // Only while a run is going. Adjacent toolbar items share one piece of
+        // glass, so a permanent count sat inside the action's own pill and read
+        // as text overflowing it; the idle count lives in the sidebar instead.
         if model.isBusy {
             ToolbarItem { runStatus }
             ToolbarItem {
                 Button("Pause") { model.pause() }
                     .help("Stop after the current batch. Resume picks up where it left off.")
-            }
-        } else if !model.rows.isEmpty, !model.remaining.isEmpty {
-            ToolbarItem {
-                Text("\(model.remaining.count.formatted(.number)) left · ~\(minutes(model.estimatedSeconds))")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
             }
         }
 
@@ -135,6 +136,11 @@ struct ContentView: View {
                             .foregroundStyle(summary.orphanedFolderReferences > 0 ? .orange : .secondary)
                     }
                     LabeledContent("Taxonomy", value: "\(model.taxonomyFolderCount) folders")
+                    if !model.remaining.isEmpty, !model.rows.isEmpty {
+                        LabeledContent("Still to classify") {
+                            Text("\(model.remaining.count.formatted(.number)) · ~\(minutes(model.estimatedSeconds))")
+                        }
+                    }
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
