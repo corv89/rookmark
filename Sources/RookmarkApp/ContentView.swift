@@ -1,5 +1,6 @@
 import AppKit
 import RookmarkKit
+import Synchronization
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -32,11 +33,31 @@ struct ContentView: View {
             guard let provider = providers.first(where: {
                 $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
             }) else { return false }
+
+            // Acceptance needs the resolved URL: html/htm is decided from the file
+            // extension (OrganizerModel.isImportableFile), and only returning false
+            // here springs a bad drag back. The completion handler is the single
+            // place an import can start; the bounded synchronous wait below only
+            // decides the return value. File URL data is already on the drag
+            // pasteboard, so resolving is normally instant; on a timeout the drag is
+            // accepted and the same gate in the completion still keeps a non-export
+            // (folder, PDF, json) from ever reaching the model.
+            let gate = DispatchSemaphore(value: 0)
+            let resolved = Mutex<URL?>(nil)
             provider.loadObject(ofClass: URL.self) { url, _ in
+                resolved.withLock { $0 = url }
+                gate.signal()
                 guard let url else { return }
-                Task { @MainActor in model.requestImport(from: url) }
+                Task { @MainActor in
+                    guard OrganizerModel.isImportableFile(url) else { return }
+                    model.requestImport(from: url)
+                }
             }
-            return true
+            let decided = gate.wait(timeout: .now() + 0.5) != .timedOut
+            if let url = resolved.withLock({ $0 }) {
+                return OrganizerModel.isImportableFile(url)
+            }
+            return !decided   // completed without a URL: reject; timed out: let the completion decide
         }
         .confirmationDialog(
             "Replace the run on screen?",
@@ -51,6 +72,12 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { model.cancelImport() }
         } message: { _ in
             Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
+        }
+        .onChange(of: model.source) { _, _ in
+            // The footer path belongs to the previous source's export. Cleared even
+            // when a failed import rolls the source straight back: the label is
+            // informational, never a promise.
+            exportedPath = nil
         }
     }
 
@@ -270,7 +297,7 @@ struct ContentView: View {
     private var detail: some View {
         switch model.phase {
         case .failed(let message):
-            notice(message, systemImage: "exclamationmark.triangle", tint: .orange)
+            failureNotice(message)
         case .scanning:
             notice(scanningTitle, systemImage: "magnifyingglass")
         case .classifying where model.rows.isEmpty, .finishing where model.rows.isEmpty:
@@ -290,6 +317,7 @@ struct ContentView: View {
             }
         default:
             VStack(spacing: 0) {
+                importFailureBanner
                 availabilityBanner
                 statusBanner
                 resultsTable
@@ -314,6 +342,51 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 440)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    /// A failed import while a run was on screen: the run survives, so the
+    /// failure is a dismissible banner over the table, not a replacement for it.
+    @ViewBuilder
+    private var importFailureBanner: some View {
+        if let message = model.importFailureMessage {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .imageScale(.small)
+                Text("Import failed: \(message)")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("OK") { model.dismissImportFailure() }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .capsule)
+            .padding(.bottom, 10)
+            .frame(maxWidth: 720)
+        }
+    }
+
+    /// Full-detail failure, reserved for failures with no run to protect (a
+    /// launch scan or a first import). The way back lives here, not only in the
+    /// toolbar, so a dead scan never dead-ends the app (T3 review, major 3).
+    private func failureNotice(_ message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30))
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+            Button("Start over") { model.discardSession() }
+                .buttonStyle(.glass)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
