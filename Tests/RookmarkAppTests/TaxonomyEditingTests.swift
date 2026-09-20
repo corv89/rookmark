@@ -242,7 +242,7 @@ struct TaxonomyEditingTests {
         model.discardSession()
 
         #expect(model.rows.isEmpty)
-        #expect(model.workingFolders == try OrganizerModel.loadPinnedTaxonomy().folders)
+        try #expect(model.workingFolders == OrganizerModel.loadPinnedTaxonomy().folders)
     }
 
     @Test("canonical names mirror the classifier's matching")

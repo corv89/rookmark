@@ -23,7 +23,7 @@ struct TaxonomyCopyIntegrityTests {
 
     @Test(
         "bundled copy is byte-identical to tuning/consolidated-taxonomy-v5.json",
-        .skip(
+        .disabled(
             if: !FileManager.default.fileExists(
                 atPath: TaxonomyCopyIntegrityTests.tuningCopy.path(percentEncoded: false)
             ),

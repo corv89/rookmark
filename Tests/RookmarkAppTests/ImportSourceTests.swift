@@ -1,3 +1,4 @@
+import Foundation
 import RookmarkKit
 import Testing
 
@@ -34,7 +35,8 @@ struct ImportSourceTests {
         let model = OrganizerModel()
         model.requestImport(from: URL(filePath: "/tmp/exports/bookmarks.json"))
         guard case .failed(let message) = model.phase else {
-            return Issue.record("expected .failed, got \(model.phase)")
+            Issue.record("expected .failed, got \(model.phase)")
+            return
         }
         #expect(message.contains("bookmarks.json"))
         #expect(model.pendingImport == nil)
@@ -118,7 +120,8 @@ struct ImportSourceTests {
         let model = OrganizerModel()
         await model.importFile(at: url, discardingSession: false)
         guard case .failed(let message) = model.phase else {
-            return Issue.record("expected .failed, got \(model.phase)")
+            Issue.record("expected .failed, got \(model.phase)")
+            return
         }
         #expect(message.contains(url.lastPathComponent))
         // The failure path must leave the model honestly empty: a stale library
@@ -171,7 +174,8 @@ struct ImportSourceTests {
                                 folder: "Development", confidence: 90, modelChoice: nil)])
         model.requestImport(from: URL(filePath: "/tmp/exports/bookmarks.json"))
         guard case .idle = model.phase else {
-            return Issue.record("expected .idle, got \(model.phase)")
+            Issue.record("expected .idle, got \(model.phase)")
+            return
         }
         #expect(model.importFailureMessage?.contains("bookmarks.json") == true)
         #expect(model.rows.count == 1 && model.source == .file(export))
