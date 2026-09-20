@@ -600,8 +600,14 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 480)
                 }
-                .padding(24)
-                .frame(maxWidth: max(gridWidth, 480))
+                // The width is the content's own plus the inset, not clamped to
+                // the content: a frame at exactly `gridWidth` squeezes the side
+                // padding back out again, because the grid inside is a fixed
+                // width and wins. That left the card row flush against the
+                // dashes while top and bottom kept their margins.
+                .padding(.horizontal, Self.panelInset)
+                .padding(.vertical, 24)
+                .frame(width: panelWidth)
                 .background(
                     RoundedRectangle(cornerRadius: 14)
                         .strokeBorder(
@@ -628,6 +634,11 @@ struct ContentView: View {
 
     private static let cardMaxWidth: CGFloat = 186
     private static let cardSpacing: CGFloat = 10
+    /// Side margin between the cards and the dashed border, sized to read as
+    /// balanced against the vertical padding above the heading and below the
+    /// privacy note. Derived from the grid rather than fixed to a card count,
+    /// so it holds whatever `columnCount` picks on a given Mac.
+    private static let panelInset: CGFloat = 30
 
     /// Only the browsers this Mac actually has, plus the catch-all. A browser
     /// Rookmark cannot draw the real icon for is not shown at all: an SF Symbol
@@ -659,6 +670,13 @@ struct ContentView: View {
     private var gridWidth: CGFloat {
         let columns = CGFloat(columnCount)
         return columns * Self.cardMaxWidth + (columns - 1) * Self.cardSpacing
+    }
+
+    /// The dashed panel: whatever the widest child needs, plus a side margin on
+    /// each edge. The floor keeps the explanatory lines from being forced into
+    /// a narrow column when only two or three cards are on screen.
+    private var panelWidth: CGFloat {
+        max(gridWidth, 440) + Self.panelInset * 2
     }
 
     /// One browser. Orion's card runs the real importer when the profile is
