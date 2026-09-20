@@ -120,8 +120,11 @@ Implemented in `Pipeline/Classifier.swift`. Rules:
 - **Validation + confidence floor.** Even on the free-string path, the returned
   folder is validated against the allowed set (exact → case/space-insensitive →
   `Unsorted`); assignments below `confidenceFloor` are demoted to `Unsorted`.
-- **Concurrency.** `maxConcurrency` defaults to **1**. A sliding-window TaskGroup
-  is permitted but expected to give marginal gains; do not prioritize it.
+- **Concurrency.** `maxConcurrency` defaults to **4** via a sliding-window
+  TaskGroup (fixed-size chunks, no cross-chunk adaptive batch resizing).
+  Measured (2026-09-20, 200-item corpus): ~10% wall-clock win at
+  maxConcurrency=4 vs. 1, no significant precision/yield cost — see
+  TODO.txt item 2. `=1` is still exact-equivalent to the old sequential path.
 
 ### Classification output: two paths
 

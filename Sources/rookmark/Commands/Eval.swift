@@ -24,6 +24,13 @@ struct Eval: AsyncParsableCommand {
 // MARK: - Shared helpers
 
 enum EvalCLI {
+    /// Left-pads a column for tabular CLI output. `String(format:)`'s `%s`
+    /// specifier expects a C string, not a Swift `String` — passing one crashes
+    /// (SIGSEGV in `__CFStringAppendFormatCore`) rather than printing garbage.
+    static func padded(_ s: String, _ width: Int) -> String {
+        s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
+    }
+
     static func defaultLabelsDB(for input: String) -> String {
         (input as NSString).deletingPathExtension + ".labels.db"
     }
@@ -174,19 +181,28 @@ struct EvalRun: AsyncParsableCommand {
 
         print("rookmark eval: \(runs) runs on \(input) (\(bookmarkCount) bookmarks)")
         print("")
-        print(String(format: "%-20s%-10s%-10s%-10s%-10s%-10s", "Metric", "Mean", "StdDev", "Min", "Max", "Range"))
+        print(EvalCLI.padded("Metric", 20) + EvalCLI.padded("Mean", 10) + EvalCLI.padded("StdDev", 10)
+              + EvalCLI.padded("Min", 10) + EvalCLI.padded("Max", 10) + EvalCLI.padded("Range", 10))
         print(String(repeating: "\u{2500}", count: 65))
 
         func row(_ label: String, _ s: (mean: Double, stddev: Double, min: Double, max: Double)) {
             let range = s.max - s.min
-            print(String(format: "%-20s%-10.1f%-10.1f%-10.1f%-10.1f%-10.1f",
-                         label, s.mean, s.stddev, s.min, s.max, range))
+            print(EvalCLI.padded(label, 20)
+                  + EvalCLI.padded(String(format: "%.1f", s.mean), 10)
+                  + EvalCLI.padded(String(format: "%.1f", s.stddev), 10)
+                  + EvalCLI.padded(String(format: "%.1f", s.min), 10)
+                  + EvalCLI.padded(String(format: "%.1f", s.max), 10)
+                  + EvalCLI.padded(String(format: "%.1f", range), 10))
         }
 
         func intRow(_ label: String, _ s: (mean: Double, stddev: Double, min: Double, max: Double)) {
             let range = s.max - s.min
-            print(String(format: "%-20s%-10.0f%-10.1f%-10.0f%-10.0f%-10.0f",
-                         label, s.mean, s.stddev, s.min, s.max, range))
+            print(EvalCLI.padded(label, 20)
+                  + EvalCLI.padded(String(format: "%.0f", s.mean), 10)
+                  + EvalCLI.padded(String(format: "%.1f", s.stddev), 10)
+                  + EvalCLI.padded(String(format: "%.0f", s.min), 10)
+                  + EvalCLI.padded(String(format: "%.0f", s.max), 10)
+                  + EvalCLI.padded(String(format: "%.0f", range), 10))
         }
 
         row("Sort rate (%)", s1)
@@ -527,7 +543,7 @@ struct EvalSweep: AsyncParsableCommand {
     @Argument(help: "Path to the exported bookmarks HTML file.")
     var input: String
 
-    @Option(name: .customLong("param"), help: "Parameter to sweep (confidenceFloor, batchSize, similarityThreshold, mergeThreshold, maxNewFolders, minClusterSize, minResidue).")
+    @Option(name: .customLong("param"), help: "Parameter to sweep (confidenceFloor, batchSize, similarityThreshold, mergeThreshold, maxNewFolders, minClusterSize, minResidue, maxConcurrency).")
     var param: String
 
     @Option(name: .customLong("values"), help: "Comma-separated values to try.")
@@ -600,20 +616,25 @@ struct EvalSweep: AsyncParsableCommand {
 
         print("Sweep: \(param) on \(input) (\(labels.count) labels)")
         print("")
-        print(String(format: "%-10s%-10s%-12s%-12s%-10s%-20s",
-                     "Value", "Yield", "Precision", "Coverage", "CI", "Paired vs baseline"))
-        print(String(repeating: "\u{2500}", count: 74))
+        print(EvalCLI.padded("Value", 10) + EvalCLI.padded("Yield", 10) + EvalCLI.padded("Precision", 12)
+              + EvalCLI.padded("Coverage", 12) + EvalCLI.padded("CI", 10) + EvalCLI.padded("Paired vs baseline", 20)
+              + EvalCLI.padded("Wall (s)", 10))
+        print(String(repeating: "\u{2500}", count: 84))
         for r in results {
             let ciStr = String(format: "[%.0f,%.0f]", r.ci.lower * 100, r.ci.upper * 100)
             let pairedStr: String
             if let p = r.pairedVsBaseline {
-                pairedStr = String(format: "%+.1f%% %@", p.meanDiff * 100, p.significant ? "*" : "")
+                pairedStr = String(format: "%+.1f%%", p.meanDiff * 100) + (p.significant ? " *" : "")
             } else {
                 pairedStr = "(baseline)"
             }
-            print(String(format: "%-10s%-10.1f%-12.1f%-12.1f%-10s%-20s",
-                         r.paramValue, r.metrics.yield * 100, r.metrics.precision * 100,
-                         r.metrics.coverage * 100, ciStr, pairedStr))
+            print(EvalCLI.padded(r.paramValue, 10)
+                  + EvalCLI.padded(String(format: "%.1f", r.metrics.yield * 100), 10)
+                  + EvalCLI.padded(String(format: "%.1f", r.metrics.precision * 100), 12)
+                  + EvalCLI.padded(String(format: "%.1f", r.metrics.coverage * 100), 12)
+                  + EvalCLI.padded(ciStr, 10)
+                  + EvalCLI.padded(pairedStr, 20)
+                  + EvalCLI.padded(String(format: "%.1f", r.elapsedSeconds), 10))
         }
     }
 }
@@ -960,7 +981,7 @@ struct EvalJudge: AsyncParsableCommand {
         print("Human labels: \(humanLabels.count) (\(humanAccept) accept, \(humanReject) reject)")
         print("Shared keys: \(shared)")
         print(String(format: "Agreement: %.1f%%", agreement * 100))
-        print(String(format: "Cohen's kappa: %.2f %@", kappa, kappaLabel(kappa)))
+        print(String(format: "Cohen's kappa: %.2f ", kappa) + kappaLabel(kappa))
 
         try labelStore.upsert(judgeLabels)
         print("Judge labels written to \(dbPath)")

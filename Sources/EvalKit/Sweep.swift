@@ -7,19 +7,22 @@ public struct SweepResult: Sendable {
     public var metrics: ClassificationMetrics
     public var ci: (lower: Double, upper: Double)
     public var pairedVsBaseline: (meanDiff: Double, ci: (Double, Double), significant: Bool)?
+    public var elapsedSeconds: Double
 
     public init(
         paramName: String,
         paramValue: String,
         metrics: ClassificationMetrics,
         ci: (lower: Double, upper: Double),
-        pairedVsBaseline: (meanDiff: Double, ci: (Double, Double), significant: Bool)? = nil
+        pairedVsBaseline: (meanDiff: Double, ci: (Double, Double), significant: Bool)? = nil,
+        elapsedSeconds: Double = 0
     ) {
         self.paramName = paramName
         self.paramValue = paramValue
         self.metrics = metrics
         self.ci = ci
         self.pairedVsBaseline = pairedVsBaseline
+        self.elapsedSeconds = elapsedSeconds
     }
 }
 
@@ -42,7 +45,9 @@ public enum Sweep {
             var opts = baseOptions
             applyParam(&opts, param: param, value: value)
 
+            let start = Date()
             let result = try await organizer.organize(html: html, options: opts)
+            let elapsed = Date().timeIntervalSince(start)
             let decisions = result.bookmarks.map { b in
                 Classifier.Decision(
                     bookmarkID: b.id,
@@ -73,7 +78,8 @@ public enum Sweep {
                 paramValue: value,
                 metrics: m,
                 ci: ci,
-                pairedVsBaseline: paired
+                pairedVsBaseline: paired,
+                elapsedSeconds: elapsed
             ))
         }
 
@@ -109,6 +115,10 @@ public enum Sweep {
         case "minResidue":
             if let v = Int(value) {
                 opts.clustering.minResidue = v
+            }
+        case "maxConcurrency":
+            if let v = Int(value) {
+                opts.classifier.maxConcurrency = v
             }
         default:
             break

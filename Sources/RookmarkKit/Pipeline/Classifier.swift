@@ -8,7 +8,9 @@ import FoundationModels
 ///  • A fresh `LanguageModelSession` per batch — never accumulate transcript.
 ///  • Short, token-budgeted batches; shrink-and-retry on context overflow.
 ///  • Refusals are an expected per-item outcome → isolate, then route to Unsorted.
-///  • Sequential by default (concurrency buys little on a serialized resource).
+///  • Up to 4 batches in flight at once (sliding-window TaskGroup) — measured
+///    ~10% wall-clock win at maxConcurrency=4 on a 200-item corpus with no
+///    significant precision/yield cost (2026-09-20 sweep); see TODO.txt item 2.
 public actor Classifier {
 
     public struct Config: Sendable {
@@ -26,7 +28,7 @@ public actor Classifier {
             initialBatchSize: Int = 0,
             minBatchSize: Int = 1,
             confidenceFloor: Int = 15,
-            maxConcurrency: Int = 1
+            maxConcurrency: Int = 4
         ) {
             self.initialBatchSize = initialBatchSize
             self.minBatchSize = minBatchSize
@@ -118,11 +120,18 @@ public actor Classifier {
     ) async throws -> [Decision] {
         let allowed = Set(taxonomy.allowedFolderNames.map(Self.canonical))
         let folderBlock = Self.renderFolders(taxonomy)
+        let ceiling = derivedInitialBatchSize(bookmarks, folderBlock: folderBlock, enrichments: enrichments)
+
+        if config.maxConcurrency > 1 {
+            return try await classifyConcurrently(
+                bookmarks, taxonomy: taxonomy, folderBlock: folderBlock, allowed: allowed,
+                enrichments: enrichments, chunkSize: ceiling, progress: progress, onBatch: onBatch
+            )
+        }
 
         var decisions: [Decision] = []
         decisions.reserveCapacity(bookmarks.count)
         var index = 0
-        let ceiling = derivedInitialBatchSize(bookmarks, folderBlock: folderBlock, enrichments: enrichments)
         var batchSize = ceiling
 
         /// Records a finished slice and publishes it before the next model call.
@@ -175,6 +184,108 @@ public actor Classifier {
             }
         }
         return decisions
+    }
+
+    // MARK: - Concurrent path (maxConcurrency > 1)
+
+    /// Sliding-window TaskGroup: up to `config.maxConcurrency` chunks in flight
+    /// at once, each a fixed size (no cross-chunk adaptive resizing, since chunks
+    /// run out of order and can't share a running `batchSize` heuristic). Overflow
+    /// and refusal are handled per-chunk by `classifySliceRobust`. Order of the
+    /// returned decisions is unspecified — callers key by `bookmarkID` (see
+    /// `BatchHandler`), and `Organizer` already does.
+    private func classifyConcurrently(
+        _ bookmarks: [Bookmark],
+        taxonomy: Taxonomy,
+        folderBlock: String,
+        allowed: Set<String>,
+        enrichments: [String: ContentEnricher.EnrichResult]?,
+        chunkSize: Int,
+        progress: ProgressHandler?,
+        onBatch: BatchHandler?
+    ) async throws -> [Decision] {
+        let size = max(1, chunkSize)
+        let chunks: [[Bookmark]] = stride(from: 0, to: bookmarks.count, by: size).map {
+            Array(bookmarks[$0..<min($0 + size, bookmarks.count)])
+        }
+
+        var decisions: [Decision] = []
+        decisions.reserveCapacity(bookmarks.count)
+        var done = 0
+
+        try await withThrowingTaskGroup(of: [Decision].self) { group in
+            var nextChunk = 0
+            let window = min(config.maxConcurrency, chunks.count)
+
+            func launchNext() {
+                guard nextChunk < chunks.count else { return }
+                let chunk = chunks[nextChunk]
+                nextChunk += 1
+                group.addTask {
+                    try await self.classifySliceRobust(
+                        chunk, folderBlock: folderBlock, allowed: allowed,
+                        taxonomy: taxonomy, enrichments: enrichments
+                    )
+                }
+            }
+
+            for _ in 0..<window { launchNext() }
+
+            while let batch = try await group.next() {
+                try Task.checkCancellation()
+                decisions.append(contentsOf: batch)
+                done += batch.count
+                onBatch?(batch)
+                progress?(done, bookmarks.count)
+                launchNext()
+            }
+        }
+
+        return decisions
+    }
+
+    /// Classifies one fixed-size slice, handling overflow/refusal locally by
+    /// splitting — mirrors the sequential loop's shrink/isolate behavior but
+    /// self-contained per slice, since concurrent chunks share no mutable state.
+    private func classifySliceRobust(
+        _ slice: [Bookmark],
+        folderBlock: String,
+        allowed: Set<String>,
+        taxonomy: Taxonomy,
+        enrichments: [String: ContentEnricher.EnrichResult]?
+    ) async throws -> [Decision] {
+        guard !slice.isEmpty else { return [] }
+        do {
+            return try await classifyBatch(slice, folderBlock: folderBlock,
+                                            allowed: allowed, taxonomy: taxonomy,
+                                            enrichments: enrichments)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let err as ClassifierError {
+            switch err {
+            case .contextOverflow where slice.count > config.minBatchSize:
+                let mid = slice.count / 2
+                async let left = classifySliceRobust(Array(slice[..<mid]), folderBlock: folderBlock,
+                                                       allowed: allowed, taxonomy: taxonomy, enrichments: enrichments)
+                async let right = classifySliceRobust(Array(slice[mid...]), folderBlock: folderBlock,
+                                                        allowed: allowed, taxonomy: taxonomy, enrichments: enrichments)
+                return try await left + right
+            case .refused where slice.count > 1:
+                var out: [Decision] = []
+                for b in slice {
+                    out += try await classifySliceRobust([b], folderBlock: folderBlock,
+                                                           allowed: allowed, taxonomy: taxonomy, enrichments: enrichments)
+                }
+                return out
+            default:
+                unsortedCauses.unmapped += slice.count
+                return slice.map { Decision(bookmarkID: $0.id, folder: Taxonomy.unsorted, confidence: 0) }
+            }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            unsortedCauses.unmapped += slice.count
+            return slice.map { Decision(bookmarkID: $0.id, folder: Taxonomy.unsorted, confidence: 0) }
+        }
     }
 
     /// Largest batch (up to `autoBatchCap`) whose rendered prompt still fits the
