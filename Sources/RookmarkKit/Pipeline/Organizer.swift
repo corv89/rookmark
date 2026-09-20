@@ -9,6 +9,20 @@ public struct TaxonomyEnvelope: Codable, Sendable {
     }
 }
 
+/// Minimal classification seam so tests can drive `organize` without the
+/// on-device model; the production implementation is `Classifier` itself.
+protocol Classification: Sendable {
+    func classify(
+        _ bookmarks: [Bookmark],
+        taxonomy: Taxonomy,
+        enrichments: [String: ContentEnricher.EnrichResult]?,
+        progress: Classifier.ProgressHandler?,
+        onBatch: Classifier.BatchHandler?
+    ) async throws -> [Classifier.Decision]
+}
+
+extension Classifier: Classification {}
+
 /// Top-level orchestrator wiring the phases together. The CLI's `organize`
 /// command is a thin shell over this.
 public struct Organizer: Sendable {
@@ -68,9 +82,22 @@ public struct Organizer: Sendable {
     }
 
     private let factory: SessionFactory
+    private let makeClassifier: @Sendable (Classifier.Config, TokenBudget, Taxonomy) -> any Classification
 
     public init(factory: SessionFactory = SessionFactory()) {
         self.factory = factory
+        self.makeClassifier = { config, budget, taxonomy in
+            Classifier(factory: factory, config: config, budget: budget, taxonomy: taxonomy)
+        }
+    }
+
+    /// Test seam: inject a deterministic classifier (see OrganizerResumeTests).
+    init(
+        factory: SessionFactory,
+        makeClassifier: @escaping @Sendable (Classifier.Config, TokenBudget, Taxonomy) -> any Classification
+    ) {
+        self.factory = factory
+        self.makeClassifier = makeClassifier
     }
 
     /// One-shot, in-memory by default. With `options.stateful`, route through
@@ -154,7 +181,7 @@ public struct Organizer: Sendable {
             }
         }
 
-        let classifier = Classifier(factory: factory, config: classifierConfig, budget: budget, taxonomy: taxonomy)
+        let classifier = makeClassifier(classifierConfig, budget, taxonomy)
         var decisions = try await classifier.classify(
             parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments,
             progress: progress, onBatch: onBatch
@@ -211,11 +238,11 @@ public struct Organizer: Sendable {
                             taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
                         }
 
-                        let reClassifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
+                        let reClassifier = makeClassifier(options.classifier, budget, taxonomy)
                         // Re-placements revise rows the UI already showed, so they
                         // go out through onBatch too.
                         let residueDecisions = try await reClassifier.classify(
-                            residue, taxonomy: taxonomy, onBatch: onBatch
+                            residue, taxonomy: taxonomy, enrichments: nil, progress: nil, onBatch: onBatch
                         )
 
                         let residueDecisionMap = Dictionary(uniqueKeysWithValues: residueDecisions.map { ($0.bookmarkID, $0) })
