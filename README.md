@@ -67,16 +67,21 @@ and therefore shows up as `RookmarkApp` rather than `Rookmark`:
 swift run -c release RookmarkApp
 ```
 
-Reads the installed [Orion](https://browser.kagi.com/) profile, classifies a sample or the whole library, and
-presents the result for review: folders with counts down the side, items sorted
-least-confident-first so your attention lands where the model is weakest, and an
-inspector explaining why each item went where it did. Nothing is written until
-you press Export.
+On first launch (or once you clear the current library via Switch Source) you
+get a welcome screen with one card per browser actually installed on your Mac —
+[Orion](https://browser.kagi.com/) reads automatically if it's there; anything
+else (Safari, Chrome, Firefox, Brave, ...) gets a card naming exactly where that
+browser hides its Export Bookmarks command, which opens straight into a file
+picker. Nothing not installed is guessed at — an uninstalled browser simply
+doesn't get a card, so you're never looking at a wrong or placeholder logo.
+Dragging an export onto the window or pressing Cmd+O both still work too,
+for anything the grid doesn't cover.
 
-Any other browser works too: export your bookmarks as HTML and drop the file on
-the window (Safari: File ▸ Export Bookmarks). You can also press Cmd+O. The file
-is only read, never modified, and the result still comes back as a new file when
-you press Export.
+Whichever way it loads, the result is presented for review: folders with counts
+down the side, items sorted least-confident-first so your attention lands where
+the model is weakest, and an inspector explaining why each item went where it
+did. Nothing is written until you press Export, and your browser is never
+modified — Rookmark only ever reads the export file.
 
 ### Command line
 
@@ -126,27 +131,36 @@ On 720 hand-labeled placements from a real collection:
 | Placement precision (accepted / placed) | 84.0% |
 | Effective yield (accepted / total) | 81.4% |
 
-Throughput is roughly 1.1 seconds per bookmark on an M4. The Neural Engine is
-the same across the M4 line, regardless of which variant you have.
+Throughput is roughly 0.9 seconds per bookmark on an M4 with default settings
+(auto-derived batch size, up to 4 classification batches in flight at once).
+The Neural Engine is the same across the M4 line, regardless of which variant
+you have.
 
 These figures come from one person's collection and are provisional. See
 `docs/EVALUATION.md` for the methodology and `docs/TUNING.md` for the tuning
-runbook. The `eval` subcommand reproduces all of it.
+runbook. The `eval` subcommand computes the same statistics against your own
+labels, but treat it as a tool for measuring a *fresh* run, not a way to
+reproduce this exact table: re-running classification against the same taxonomy
+does not reliably reproduce a historical run item-for-item, so a rerun's numbers
+will disagree with the ones above even with nothing else changed.
 
 ## What it will not do
 
 - **It does not edit your existing bookmarks!** Output is always a new file that you
   choose to import manually, once you're satisfied with the proposed structure.
 - **It never sends your bookmarks anywhere.** Classification and embedding both
-  run on-device. Optional page-description fetching and liveness checks are the
-  only features that touch the network, and they're off unless you say otherwise.
+  run on-device. Page-description fetching and link-liveness checks are the
+  only features that touch the network (each request just fetches a URL your
+  bookmarks already point at). The GUI never does this. The CLI's `organize`
+  does it **by default** — pass `--no-enrich` to turn it off, as the example
+  above does.
 
 ## Known limitations
 
-- Safari's bookmarks are unreadable without Full Disk Access; export manually
-  from Safari and drop the file on the window instead. Chrome, Firefox, Edge,
-  and Brave work the same way: export bookmarks as HTML from the browser's
-  bookmark manager, then drop the file on the window.
+- Only Orion has a live importer; every other browser — including Safari,
+  which is unreadable without Full Disk Access — needs a manual HTML export.
+  The welcome screen's per-browser cards exist because of this: each one just
+  points you at that browser's Export Bookmarks command and opens the picker.
 - The taxonomy is flat. Rookmark won't create nested folder structures.
 
 ## Contributing
