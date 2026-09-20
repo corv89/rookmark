@@ -88,6 +88,19 @@ struct ContentView: View {
         } message: {
             Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
         }
+        .confirmationDialog(
+            "Start fresh?",
+            isPresented: Binding(
+                get: { model.pendingStartFresh },
+                set: { if !$0 { model.cancelStartFresh() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Start fresh", role: .destructive) { model.confirmStartFresh() }
+            Button("Cancel", role: .cancel) { model.cancelStartFresh() }
+        } message: {
+            Text("The run from \(model.sourceName) will be discarded and Rookmark will go back to the source picker. Export it first if you still want it.")
+        }
         .onChange(of: model.source) { _, _ in
             // The footer path belongs to the previous source's export. Cleared even
             // when a failed import rolls the source straight back: the label is
@@ -120,7 +133,10 @@ struct ContentView: View {
             // Hidden when the profile is missing or already loaded; the button would
             // otherwise be a dead control. defaultFavouritesURL is one stat call when
             // the profile exists, so evaluating it in the toolbar is cheap.
-            if OrionImporter.defaultFavouritesURL() != nil, model.source != .orionProfile {
+            // Also hidden with nothing loaded at all: the welcome grid has its own
+            // Orion card right there, so a second one in the toolbar is noise.
+            if OrionImporter.defaultFavouritesURL() != nil,
+               model.source != nil, model.source != .orionProfile {
                 Button {
                     model.requestOrionProfile()
                 } label: {
@@ -133,20 +149,43 @@ struct ContentView: View {
         }
 
         ToolbarItem {
-            Button {
-                Task { await model.organize() }
-            } label: {
-                // Toolbar buttons default to icon-only on macOS, which left the
-                // action unlabelled while the status text beside it shared the
-                // same glass capsule and read as overflow from the button.
-                Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
-                    .labelStyle(.titleAndIcon)
+            // The way back to the welcome grid, and the only control that
+            // unloads a source. Shown whenever anything is loaded — not gated
+            // behind a failure or a stale restore, which is what left the app
+            // reading as "Orion, and stuck" with no visible way to anything else.
+            if model.source != nil {
+                Button {
+                    model.requestStartFresh()
+                } label: {
+                    Label("Switch source", systemImage: "rectangle.grid.2x2")
+                        .labelStyle(.titleAndIcon)
+                }
+                .disabled(model.isBusy)
+                .help("Discard this run and go back to the list of browsers. Export it first if you want to keep it.")
             }
-            .keyboardShortcut(.return)
-            .disabled(model.isBusy || model.remaining.isEmpty || !model.isModelAvailable)
-            .help(model.remaining.isEmpty
-                  ? "Every bookmark has a proposed folder."
-                  : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
+        }
+
+        ToolbarItem {
+            // Nothing loaded means nothing to organize, and the disabled button
+            // read as a broken control on the welcome screen rather than an
+            // action waiting for input.
+            if model.source != nil {
+                Button {
+                    Task { await model.organize() }
+                } label: {
+                    // Toolbar buttons default to icon-only on macOS, which left
+                    // the action unlabelled while the status text beside it
+                    // shared the same glass capsule and read as overflow from
+                    // the button.
+                    Label(organizeTitle, systemImage: model.rows.isEmpty ? "wand.and.stars" : "play.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                .keyboardShortcut(.return)
+                .disabled(model.isBusy || model.remaining.isEmpty || !model.isModelAvailable)
+                .help(model.remaining.isEmpty
+                      ? "Every bookmark has a proposed folder."
+                      : "Classify the \(model.remaining.count) bookmarks without a folder yet, about \(minutes(model.estimatedSeconds)).")
+            }
         }
 
         // Just the control. Adjacent toolbar items share one piece of glass, so
@@ -443,7 +482,12 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 440)
-            Button("Start over") { model.discardSession() }
+            // Start over, not Discard: a failure with nothing on screen should
+            // land on the source picker, where another browser can be chosen —
+            // discardSession() alone would keep the source that just failed.
+            // Routed through the request so a failure that *does* have rows
+            // (a run that died mid-classify) still gets the export-first warning.
+            Button("Start over") { model.requestStartFresh() }
                 .buttonStyle(.glass)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -489,74 +533,171 @@ struct ContentView: View {
         .padding(40)
     }
 
-    /// No source loaded yet. The drop is the primary action; the button and the
-    /// toolbar's Cmd+O are the keyboard-accessible equivalents.
+    /// No source loaded yet. One card per browser is the primary affordance:
+    /// the previous single "Choose a file…" button carried a paragraph of hints
+    /// covering every browser at once, which meant the answer to "how do I get
+    /// my Chrome bookmarks in" was buried in prose rather than being a thing to
+    /// click. Drag-and-drop is unchanged and still lands anywhere on the window;
+    /// it is named here as the secondary path, not the only one.
     private var dropTarget: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "square.and.arrow.down")
-                .font(.system(size: 30))
-                .foregroundStyle(.tint)
+        // The dashed panel is sized to its content and centred, rather than
+        // stretched to the whole detail column: filling the column left the
+        // cards pinned to the top of an otherwise empty rectangle several times
+        // their height. GeometryReader + a minHeight is what centres it while
+        // still letting it scroll if the window is shorter than the content.
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 18) {
+                    VStack(spacing: 5) {
+                        Text("Where are your bookmarks?")
+                            .font(.title2.weight(.semibold))
+                        Text("Pick a browser. Rookmark only ever reads — your browser is never modified.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
 
-            VStack(spacing: 6) {
-                Text("Drag a bookmarks export here, or")
-                Button("Choose a file…") { chooseFile() }
-                    .buttonStyle(.glass)
-            }
-            .font(.title3.weight(.medium))
+                    // Four fixed columns against eight cards, so the grid is
+                    // always a full 4×2 block. An adaptive column count reflows
+                    // to three at narrow widths and strands two cards on a short
+                    // last row; a fixed count squeezes the cards instead, which
+                    // the captions already tolerate (they wrap to two lines).
+                    LazyVGrid(
+                        columns: Array(
+                            repeating: GridItem(.flexible(minimum: 118), spacing: 10),
+                            count: 4
+                        ),
+                        spacing: 10
+                    ) {
+                        ForEach(BrowserSource.all) { browser in
+                            sourceCard(browser)
+                        }
+                        otherFileCard
+                    }
 
-            Text("Any browser works: export your bookmarks as HTML and drop the file on this window. The file is only read, never modified.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 460)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Where the export lives").font(.caption.weight(.medium))
-                hint("Safari", "File ▸ Export Bookmarks")
-                hint("Chrome, Edge, Brave", "Bookmark Manager ▸ Export bookmarks")
-                hint("Firefox", "Manage Bookmarks ▸ Import and Backup ▸ Export Bookmarks to HTML")
-                Text("Orion's profile is read automatically when it's installed.")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: 460, alignment: .leading)
-
-            if case .unavailable(let reason, _) = model.modelAvailability {
-                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    VStack(spacing: 6) {
+                        Label(
+                            "Or drag a bookmarks export onto this window.",
+                            systemImage: "arrow.down.doc"
+                        )
+                        Label(
+                            "Nothing leaves this Mac: classification runs against the on-device model, and Rookmark only ever writes a new file.",
+                            systemImage: "lock.laptopcomputer"
+                        )
+                        if case .unavailable(let reason, _) = model.modelAvailability {
+                            Label(reason, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 480)
+                }
+                .padding(24)
+                .frame(maxWidth: 760)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(
+                            isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
+                            style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                        )
+                        .background(
+                            isDropTargeted ? Color.accentColor.opacity(0.08) : .clear,
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                )
+                .padding(24)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height, alignment: .center)
             }
         }
-        .padding(30)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(
-                    isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
-                    style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
-                )
-                .background(
-                    isDropTargeted ? Color.accentColor.opacity(0.08) : .clear,
-                    in: RoundedRectangle(cornerRadius: 14)
-                )
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 
-    private func hint(_ browser: String, _ path: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("\(browser):").foregroundStyle(.primary)
-            Text(path)
+    /// One browser. Orion's card runs the real importer when the profile is
+    /// installed; every other browser has no native importer, so the card opens
+    /// the panel already carrying that browser's own export path — the
+    /// instruction arrives with the file chooser rather than in a wall of hints
+    /// the user has to match to their browser themselves.
+    private func sourceCard(_ browser: BrowserSource) -> some View {
+        let live = browser.readsProfileDirectly && OrionImporter.defaultFavouritesURL() != nil
+        return Button {
+            if live {
+                // Safe from here: with no source loaded the guard in
+                // requestOrionProfile falls straight through to the load.
+                model.requestOrionProfile()
+            } else {
+                chooseFile(for: browser)
+            }
+        } label: {
+            cardLabel(
+                icon: browser.icon,
+                title: browser.name,
+                caption: live ? "Read automatically" : browser.shortExportPath,
+                tint: browser.tint
+            )
         }
+        .buttonStyle(SourceCardStyle())
+        .disabled(model.isBusy)
+        .help(live
+              ? "Read the bookmarks in the installed Orion profile. Nothing to export."
+              : "In \(browser.name): \(browser.exportPath). Then choose the file it wrote.")
     }
 
-    /// Fallback for anyone without drag-and-drop. Accepts both spellings of the
-    /// extension: UTType.html covers .html, and .htm is appended dynamically when
-    /// the system maps it to a distinct type.
-    private func chooseFile() {
+    /// The catch-all, kept because the grid can only name the browsers we know
+    /// about: any Netscape-format export works, whatever wrote it.
+    private var otherFileCard: some View {
+        Button {
+            chooseFile(for: nil)
+        } label: {
+            cardLabel(
+                icon: .symbol("square.and.arrow.down"),
+                title: "Other browser",
+                caption: "Choose an HTML export",
+                tint: .secondary
+            )
+        }
+        .buttonStyle(SourceCardStyle())
+        .disabled(model.isBusy)
+        // No Cmd+O here: the toolbar's import button already owns it, and two
+        // live views claiming the same shortcut makes which one fires arbitrary.
+        .help("Any browser's bookmarks export in the Netscape HTML format (.html or .htm).")
+    }
+
+    private func cardLabel(icon: BrowserSource.Icon, title: String, caption: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            icon.view(tint: tint)
+                .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    /// Opens the panel for one browser, or for no browser in particular. The
+    /// import itself is the same call either way — `browser` only decides what
+    /// the panel says, which is the whole point: the export step is browser
+    /// specific and the file format is not.
+    private func chooseFile(for browser: BrowserSource?) {
         let panel = NSOpenPanel()
-        panel.title = "Import a bookmarks HTML file"
-        panel.message = "Choose a bookmarks export in the Netscape HTML format."
+        if let browser {
+            panel.title = "Import \(browser.name) bookmarks"
+            panel.message = "In \(browser.name): \(browser.exportPath). Then choose the HTML file it wrote."
+        } else {
+            panel.title = "Import a bookmarks HTML file"
+            panel.message = "Choose a bookmarks export in the Netscape HTML format."
+        }
+        panel.prompt = "Import"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -564,6 +705,9 @@ struct ContentView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.requestImport(from: url)
     }
+
+    /// Kept for the toolbar's Cmd+O equivalent, which belongs to no browser.
+    private func chooseFile() { chooseFile(for: nil) }
 
     private static let htmlTypes: [UTType] = {
         var types: [UTType] = [.html]
@@ -807,6 +951,149 @@ struct ContentView: View {
         var hash = 5381
         for byte in folder.utf8 { hash = (hash &* 33) &+ Int(byte) }
         return palette[abs(hash) % palette.count]
+    }
+}
+
+// MARK: - Welcome grid
+
+/// One browser on the welcome grid.
+///
+/// Only Orion has a native importer (`OrionImporter` reads its profile
+/// directly); every other browser reaches Rookmark as an HTML export, so what
+/// distinguishes these entries is almost entirely *where that browser hides its
+/// Export Bookmarks command*. That string is the payload — shown on the card,
+/// repeated in the open panel, and in the tooltip in full.
+private struct BrowserSource: Identifiable {
+    /// The bundle id, which doubles as the lookup key for the installed app's
+    /// real icon.
+    let id: String
+    let name: String
+    /// Drawn when the app is not installed. No brand assets ship with Rookmark,
+    /// and none are downloaded, so an absent browser falls back to a symbol.
+    let symbol: String
+    let tint: Color
+    /// The full path through that browser's menus, for the panel and tooltip.
+    let exportPath: String
+    /// The same instruction trimmed to fit a card. Firefox's real path is three
+    /// menus deep and does not fit anywhere sensible at card width.
+    let shortExportPath: String
+    /// Orion only: there is a live importer, so this card skips the export step.
+    var readsProfileDirectly = false
+
+    /// Orion leads because it is the one source that needs no export at all.
+    /// The rest are in rough order of how many Macs have them.
+    static let all: [BrowserSource] = [
+        BrowserSource(
+            id: "com.kagi.kagimacOS", name: "Orion", symbol: "sparkles", tint: .purple,
+            // The export path still has to be right: `readsProfileDirectly`
+            // only wins when a profile is actually installed, and on a Mac
+            // without Orion this card is an ordinary export card.
+            exportPath: "File ▸ Export ▸ Bookmarks",
+            shortExportPath: "File ▸ Export Bookmarks",
+            readsProfileDirectly: true
+        ),
+        BrowserSource(
+            id: "com.apple.Safari", name: "Safari", symbol: "safari", tint: .blue,
+            exportPath: "File ▸ Export ▸ Bookmarks",
+            shortExportPath: "File ▸ Export Bookmarks"
+        ),
+        BrowserSource(
+            id: "com.google.Chrome", name: "Chrome", symbol: "circle.circle.fill", tint: .green,
+            exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
+            shortExportPath: "Bookmark Manager ▸ Export"
+        ),
+        BrowserSource(
+            id: "org.mozilla.firefox", name: "Firefox", symbol: "flame.fill", tint: .orange,
+            exportPath: "Bookmarks ▸ Manage Bookmarks ▸ Import and Backup ▸ Export Bookmarks to HTML",
+            // Truncated at card width when it carried "to HTML" as well; the
+            // full three-menu path is in the tooltip and the open panel.
+            shortExportPath: "Manage Bookmarks ▸ Export"
+        ),
+        BrowserSource(
+            id: "com.brave.Browser", name: "Brave", symbol: "shield.lefthalf.filled", tint: .red,
+            exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
+            shortExportPath: "Bookmark Manager ▸ Export"
+        ),
+        BrowserSource(
+            id: "com.microsoft.edgemac", name: "Edge", symbol: "globe.europe.africa.fill", tint: .teal,
+            exportPath: "Favourites ▸ Manage favourites ▸ ⋯ ▸ Export favourites",
+            shortExportPath: "Manage favourites ▸ Export"
+        ),
+        BrowserSource(
+            id: "com.vivaldi.Vivaldi", name: "Vivaldi", symbol: "circle.hexagongrid.fill", tint: .pink,
+            exportPath: "File ▸ Export Bookmarks",
+            shortExportPath: "File ▸ Export Bookmarks"
+        ),
+    ]
+
+    @MainActor
+    var icon: Icon {
+        BrowserIconCache.icon(for: id).map(Icon.app) ?? .symbol(symbol)
+    }
+
+    /// The installed app's own icon when there is one, a symbol otherwise. The
+    /// real icon is what makes the grid scannable — it is the thing the user
+    /// already recognizes in their Dock — and it costs nothing to ship.
+    enum Icon {
+        case app(NSImage)
+        case symbol(String)
+
+        @ViewBuilder
+        func view(tint: Color) -> some View {
+            switch self {
+            case .app(let image):
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            case .symbol(let name):
+                Image(systemName: name)
+                    .font(.system(size: 21))
+                    .foregroundStyle(tint)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// LaunchServices lookups are cheap but not free, and a grid cell re-renders on
+/// every hover; the answer cannot change while the app is running in any way
+/// that matters, so it is resolved once per bundle id.
+@MainActor
+private enum BrowserIconCache {
+    private static var cache: [String: NSImage?] = [:]
+
+    static func icon(for bundleID: String) -> NSImage? {
+        if let cached = cache[bundleID] { return cached }
+        let image = NSWorkspace.shared
+            .urlForApplication(withBundleIdentifier: bundleID)
+            .map { NSWorkspace.shared.icon(forFile: $0.path(percentEncoded: false)) }
+        cache[bundleID] = image
+        return image
+    }
+}
+
+/// The card idiom: Liquid Glass like the rest of the app, but shaped as a
+/// rounded rect rather than the capsule `.glass` gives a normal button, and
+/// tinted on hover so a grid of twenty-odd points of tappable area still tells
+/// you which one you are on.
+private struct SourceCardStyle: ButtonStyle {
+    @State private var isHovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(height: 78)
+            .contentShape(.rect(cornerRadius: 12))
+            .glassEffect(
+                .regular.tint(.accentColor.opacity(isHovering && isEnabled ? 0.28 : 0.10)),
+                in: .rect(cornerRadius: 12)
+            )
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.45)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .onHover { isHovering = $0 }
     }
 }
 

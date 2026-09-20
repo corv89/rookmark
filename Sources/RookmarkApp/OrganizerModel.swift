@@ -142,6 +142,9 @@ final class OrganizerModel {
     /// `pendingImport` for the profile path. Non-nil drives the dialog; the load
     /// has not started.
     private(set) var pendingOrionProfile = false
+    /// A "start fresh" waiting on the same confirmation the two import paths
+    /// use. True drives the dialog; nothing has been cleared yet.
+    private(set) var pendingStartFresh = false
     /// On-device model availability, re-read at scan time and on every app
     /// activation. Never latch a result: Apple Intelligence can be turned on
     /// while Rookmark is running.
@@ -547,6 +550,44 @@ final class OrganizerModel {
             taxonomyFolders: workingFolders
         ))
     }
+
+    /// Everything `discardSession()` clears, plus the source itself: this is the
+    /// one way back to the welcome screen, where a different browser can be
+    /// picked. Kept separate from `discardSession()` rather than folded into it
+    /// because the two callers want different things — the staleness banner's
+    /// Discard re-arms Organize against the same library, this leaves the app
+    /// with no library at all — and layered on top of it rather than duplicating
+    /// it so the reset stays in one place.
+    ///
+    /// Destructive in the same way Discard is, so the UI gates it behind
+    /// `requestStartFresh()` whenever there is a run to lose. Not itself guarded
+    /// on `isBusy`, matching `discardSession()`: gating is the caller's job.
+    func startFresh() {
+        discardSession()
+        source = nil
+        allBookmarks = []
+        sourceSummary = nil
+    }
+
+    /// Entry point for the toolbar, mirroring `requestImport(from:)`: nothing
+    /// during a run, and a run on screen is thrown away only after the same
+    /// "export it first" confirmation an import replacement gets.
+    func requestStartFresh() {
+        guard !isBusy else { return }
+        if rows.isEmpty {
+            startFresh()
+        } else {
+            pendingStartFresh = true
+        }
+    }
+
+    func confirmStartFresh() {
+        guard pendingStartFresh else { return }
+        pendingStartFresh = false
+        startFresh()
+    }
+
+    func cancelStartFresh() { pendingStartFresh = false }
 
     /// Throws the saved run away and starts from nothing.
     func discardSession() {

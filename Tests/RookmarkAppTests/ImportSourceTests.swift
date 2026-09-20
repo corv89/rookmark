@@ -181,3 +181,128 @@ struct ImportSourceTests {
         #expect(model.rows.count == 1 && model.source == .file(export))
     }
 }
+
+/// The way back to the welcome screen. Distinct from `discardSession()`, which
+/// keeps the source loaded so Organize can run again over the same library:
+/// this one unloads the library too, which is the only thing that puts the
+/// browser picker back on screen.
+///
+/// Every model here is built with `persistingSessions: false` for the reason
+/// the seam exists — `startFresh()` routes through `discardSession()`, which
+/// clears the session store, and `swift test` runs on the developer's own Mac
+/// where that file holds a live review session.
+@Suite("Start fresh")
+@MainActor
+struct StartFreshTests {
+    private let export = URL(filePath: "/Users/rook/Downloads/bookmarks_2026.html")
+
+    private func loaded() -> OrganizerModel {
+        let model = OrganizerModel(persistingSessions: false)
+        model.updateSource(.file(export))
+        model.updateRows([
+            .init(id: "a", title: "A", url: "https://a.example",
+                  folder: "Development", confidence: 90, modelChoice: nil),
+        ])
+        return model
+    }
+
+    @Test("start fresh unloads the source, not just the run")
+    func clearsSourceAndLibrary() async throws {
+        let model = OrganizerModel(persistingSessions: false)
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "rookmark-startfresh-\(UUID().uuidString).html")
+        try """
+        <!DOCTYPE NETSCAPE-Bookmark-file-1>
+        <DL><p>
+            <DT><A HREF="https://rookmark-startfresh-test.invalid/a">A</A>
+        </DL><p>
+        """.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        await model.importFile(at: url, discardingSession: false)
+        #expect(model.source == .file(url))
+        #expect(model.sourceSummary?.bookmarkCount == 1)
+        #expect(!model.allBookmarks.isEmpty)
+
+        model.startFresh()
+
+        // All three are what the welcome screen keys off: ContentView shows the
+        // browser grid on `.idle` with a nil source, and the sidebar's summary
+        // section disappears with sourceSummary.
+        #expect(model.source == nil)
+        #expect(model.allBookmarks.isEmpty)
+        #expect(model.sourceSummary == nil)
+        #expect(model.phase == .idle)
+        // Organize must not stay armed against a library that is no longer loaded.
+        #expect(model.remaining.isEmpty)
+    }
+
+    @Test("start fresh does everything discard does")
+    func sharesDiscardsWork() {
+        let model = loaded()
+        model.updateWorkingTaxonomy([.init(name: "Only Folder", rationale: "")])
+        model.selectedRowID = "a"
+        model.selectedFolder = "Development"
+
+        model.startFresh()
+
+        #expect(model.rows.isEmpty)
+        // Not empty: resetTaxonomyToPinned recounts, so the group list comes
+        // back as the pinned folders at zero. Nothing is filed anywhere, which
+        // is the part that matters — and the sidebar only draws this section
+        // when there are rows.
+        #expect(model.folders.allSatisfy { $0.count == 0 })
+        #expect(model.newFolders.isEmpty)
+        #expect(model.staleness == nil)
+        #expect(model.selectedRowID == nil)
+        #expect(model.selectedFolder == OrganizerModel.allFolders)
+        #expect(model.importFailureMessage == nil)
+        // Folder edits are undone with the run, exactly as Discard undoes them.
+        #expect(model.workingFolders.count > 1)
+        #expect(!model.workingFolders.contains { $0.name == "Only Folder" })
+    }
+
+    @Test("a run on screen is thrown away only after confirmation")
+    func confirmsWhenThereIsWorkToLose() {
+        let model = loaded()
+
+        model.requestStartFresh()
+        #expect(model.pendingStartFresh, "gated, not cleared")
+        #expect(model.source == .file(export), "nothing happened yet")
+        #expect(model.rows.count == 1)
+
+        model.cancelStartFresh()
+        #expect(!model.pendingStartFresh)
+        #expect(model.source == .file(export) && model.rows.count == 1)
+
+        model.requestStartFresh()
+        model.confirmStartFresh()
+        #expect(!model.pendingStartFresh)
+        #expect(model.source == nil && model.rows.isEmpty)
+    }
+
+    @Test("confirming without a pending request does nothing")
+    func confirmNeedsARequest() {
+        let model = loaded()
+        model.confirmStartFresh()
+        #expect(model.source == .file(export) && model.rows.count == 1)
+    }
+
+    @Test("nothing to lose, no dialog")
+    func noRowsSkipsTheDialog() {
+        let model = OrganizerModel(persistingSessions: false)
+        model.updateSource(.file(export))
+        model.requestStartFresh()
+        #expect(!model.pendingStartFresh)
+        #expect(model.source == nil)
+    }
+
+    @Test("a running classification is never cleared out from under itself")
+    func refusedWhileBusy() async {
+        let model = loaded()
+        await model.updatePhase(.classifying(done: 1, total: 10))
+        model.requestStartFresh()
+        #expect(!model.pendingStartFresh)
+        #expect(model.source == .file(export) && model.rows.count == 1)
+    }
+}
