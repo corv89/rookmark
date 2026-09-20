@@ -133,21 +133,10 @@ public struct Organizer: Sendable {
         let ctx = factory.contextSize()
         let budget = TokenBudget(total: ctx)
 
-        var taxonomy: Taxonomy
-        if let pinned = options.pinnedTaxonomy {
-            taxonomy = pinned
-        } else {
-            taxonomy = try await TaxonomyBuilder(factory: factory, budget: budget)
-                .build(from: parse, mode: options.taxonomyMode, folderLanguage: options.clustering.folderLanguage)
-        }
-
-        if taxonomy.folders.count > options.constrainedFolderCap {
-            taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
-        }
-
         let store: Store?
         var runID: Int64?
         var committedDecisions: [Classifier.Decision] = []
+        var priorTaxonomy: Taxonomy?       // the resumed run's stored taxonomy, if any
         var toClassify = parse.bookmarks   // resume filtering happens AFTER the id-sort above
         if options.stateful, let path = options.storePath ?? options.sourcePath.map({ $0 + ".db" }) {
             let s = try Store(path: path)
@@ -164,6 +153,14 @@ public struct Organizer: Sendable {
                 committedDecisions = Self.committedDecisions(parse.bookmarks, allRows: allRows, pendingIDs: pendingIDs)
                 toClassify = parse.bookmarks.filter { pendingIDs.contains($0.id) }
                 onResume?(committedDecisions.count, parse.bookmarks.count)
+                // The resumed run must classify AND merge against the SAME folder
+                // vocabulary its committed decisions already use — a freshly generated
+                // taxonomy can rename folders and strand those placements (M11.3).
+                // A pinned taxonomy still wins (resolution below); older DBs with no
+                // stored taxonomy fall back to the fresh build.
+                if options.pinnedTaxonomy == nil {
+                    priorTaxonomy = try? s.loadTaxonomy(runID: rid)
+                }
             } else {
                 rid = try s.createRun(sourcePath: source)
                 try s.upsert(parse.bookmarks, runID: rid)
@@ -173,6 +170,23 @@ public struct Organizer: Sendable {
             runID = rid
         } else {
             store = nil
+        }
+
+        // Pinned > the resumed run's stored taxonomy > fresh build. Resolved after
+        // the store block so a resume with a stored taxonomy never pays for a
+        // generated one it is about to discard.
+        var taxonomy: Taxonomy
+        if let pinned = options.pinnedTaxonomy {
+            taxonomy = pinned
+        } else if let prior = priorTaxonomy {
+            taxonomy = prior
+        } else {
+            taxonomy = try await TaxonomyBuilder(factory: factory, budget: budget)
+                .build(from: parse, mode: options.taxonomyMode, folderLanguage: options.clustering.folderLanguage)
+        }
+
+        if taxonomy.folders.count > options.constrainedFolderCap {
+            taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
         }
 
         var enrichments: [String: ContentEnricher.EnrichResult]?

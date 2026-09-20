@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Testing
 @testable import RookmarkKit
 
@@ -20,6 +21,7 @@ private actor SpyClassifier: Classification {
     let onEmit: (@Sendable ([Classifier.Decision]) -> Void)?
 
     private(set) var calls: [[Bookmark]] = []
+    private(set) var seenTaxonomies: [Taxonomy] = []
     private(set) var emittedBatches: [[Classifier.Decision]] = []
     private var batchesEmitted = 0
 
@@ -41,6 +43,7 @@ private actor SpyClassifier: Classification {
         onBatch: Classifier.BatchHandler?
     ) async throws -> [Classifier.Decision] {
         calls.append(bookmarks)
+        seenTaxonomies.append(taxonomy)
         var all: [Classifier.Decision] = []
         var index = 0
         while index < bookmarks.count {
@@ -93,6 +96,31 @@ private func makeTempDir() throws -> String {
     let dir = NSTemporaryDirectory() + "rookmark_resume_\(UUID().uuidString)/"
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     return dir
+}
+
+/// SQLITE_TRANSIENT is a C macro; the standard Swift bit-cast stand-in.
+private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// Seeds `runs.taxonomy_json` on a still-'running' run. Store's public API
+/// writes taxonomy only via finishRun (which completes the run), so the
+/// resume-with-stored-taxonomy path is exercised by writing the column
+/// directly — the state a run-start persist will produce (M11.3).
+private func seedStoredTaxonomy(_ taxonomy: Taxonomy, runID: Int64, dbPath: String) throws {
+    let json = String(
+        data: try JSONEncoder().encode(TaxonomyEnvelope(v: 2, folders: taxonomy.folders)),
+        encoding: .utf8)!
+    var db: OpaquePointer?
+    guard sqlite3_open(dbPath, &db) == SQLITE_OK, let db else {
+        throw NSError(domain: "seedStoredTaxonomy", code: 1)
+    }
+    defer { sqlite3_close(db) }
+    var stmt: OpaquePointer?
+    defer { sqlite3_finalize(stmt) }   // finalize(nil) is a no-op
+    guard sqlite3_prepare_v2(db, "UPDATE runs SET taxonomy_json = ?1 WHERE id = ?2", -1, &stmt, nil) == SQLITE_OK,
+          sqlite3_bind_text(stmt, 1, json, -1, sqliteTransient) == SQLITE_OK,
+          sqlite3_bind_int64(stmt, 2, runID) == SQLITE_OK,
+          sqlite3_step(stmt) == SQLITE_DONE
+    else { throw NSError(domain: "seedStoredTaxonomy", code: 2) }
 }
 
 private func fixtureHTML() -> String {
@@ -246,6 +274,101 @@ struct OrganizerResumeTests {
         let finalRows = try store.all(runID: rid)
         #expect(finalRows.count == 5)
         #expect(finalRows.allSatisfy { $0.assignedFolder != nil })
+    }
+
+    @Test("resume reuses the interrupted run's stored taxonomy")
+    func resumeReusesStoredTaxonomy() async throws {
+        guard case .available = SessionFactory().availability() else { return }
+
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sourcePath = dir + "input.html"
+        let storePath = dir + "input.db"
+        let html = fixtureHTML()
+
+        // Leg 1: die after one batch (2 of 5) landed and committed — pinned
+        // taxonomy keeps this leg off TaxonomyBuilder, exactly like the
+        // resumeSkipsCommitted setup.
+        let opts = makeOptions(storePath: storePath, sourcePath: sourcePath)
+        let firstSpy = SpyClassifier(batchWidth: 2, failAfterBatches: 1)
+        await #expect(throws: CancellationError.self) {
+            try await makeOrganizer(firstSpy).organize(html: html, options: opts)
+        }
+
+        let store = try Store(path: storePath)
+        let rid = try #require(try store.latestUnfinishedRun(sourcePath: sourcePath))
+        let committed = try store.all(runID: rid).filter { $0.assignedFolder != nil }
+        #expect(committed.count == 2)
+
+        // Pretend the interrupted run persisted its own vocabulary (M11.3
+        // run-start persist): folder names deliberately ≠ the pinned News/Dev,
+        // so the assertion below is unambiguous.
+        let stored = Taxonomy(folders: [
+            .init(name: "Stored News", rationale: "Prior run folder"),
+            .init(name: "Stored Dev", rationale: "Prior run folder"),
+        ])
+        try seedStoredTaxonomy(stored, runID: rid, dbPath: storePath)
+        #expect(try store.loadTaxonomy(runID: rid) == stored)   // seeding sanity via public API
+
+        // Leg 2: resume with no pinned taxonomy — the stored one must reach
+        // the classifier, and TaxonomyBuilder must never run (a fresh build
+        // would need the real model for this flat fixture).
+        var resumeOpts = makeOptions(storePath: storePath, sourcePath: sourcePath)
+        resumeOpts.pinnedTaxonomy = nil
+        let resumeSpy = SpyClassifier(batchWidth: 2)
+        let result = try await makeOrganizer(resumeSpy).organize(html: html, options: resumeOpts)
+
+        let taxonomies = await resumeSpy.seenTaxonomies
+        #expect(taxonomies.count == 1)          // one classify call for the 3 pending
+        #expect(taxonomies.first == stored)     // the stored taxonomy, not a fresh build
+        #expect(result.taxonomy == stored)
+
+        // Run finished against the same vocabulary it resumed with.
+        #expect(try store.latestUnfinishedRun(sourcePath: sourcePath) == nil)
+        #expect(try store.loadTaxonomy(runID: rid) == stored)   // finishRun re-persisted it (cap is a no-op here)
+    }
+
+    @Test("pinned taxonomy still wins over the stored one on resume")
+    func pinnedWinsOverStoredOnResume() async throws {
+        guard case .available = SessionFactory().availability() else { return }
+
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let sourcePath = dir + "input.html"
+        let storePath = dir + "input.db"
+        let html = fixtureHTML()
+
+        // Same interrupted-run setup, including the seeded stored taxonomy.
+        let opts = makeOptions(storePath: storePath, sourcePath: sourcePath)
+        let firstSpy = SpyClassifier(batchWidth: 2, failAfterBatches: 1)
+        await #expect(throws: CancellationError.self) {
+            try await makeOrganizer(firstSpy).organize(html: html, options: opts)
+        }
+
+        let store = try Store(path: storePath)
+        let rid = try #require(try store.latestUnfinishedRun(sourcePath: sourcePath))
+        let committed = try store.all(runID: rid).filter { $0.assignedFolder != nil }
+        #expect(committed.count == 2)
+
+        let stored = Taxonomy(folders: [
+            .init(name: "Stored News", rationale: "Prior run folder"),
+            .init(name: "Stored Dev", rationale: "Prior run folder"),
+        ])
+        try seedStoredTaxonomy(stored, runID: rid, dbPath: storePath)
+        #expect(try store.loadTaxonomy(runID: rid) == stored)
+
+        // Resume WITH a pinned taxonomy: the pin must override the stored one —
+        // a user-supplied taxonomy always wins.
+        var resumeOpts = makeOptions(storePath: storePath, sourcePath: sourcePath)
+        resumeOpts.pinnedTaxonomy = Taxonomy(folders: [.init(name: "Pinned Only", rationale: "User supplied")])
+        let resumeSpy = SpyClassifier(batchWidth: 2)
+        let result = try await makeOrganizer(resumeSpy).organize(html: html, options: resumeOpts)
+
+        let taxonomies = await resumeSpy.seenTaxonomies
+        #expect(taxonomies.count == 1)
+        #expect(taxonomies.first == resumeOpts.pinnedTaxonomy)
+        #expect(taxonomies.first != stored)     // disjoint names: no accidental equality
+        #expect(result.taxonomy == resumeOpts.pinnedTaxonomy)
     }
 
     @Test("resumed output matches an uninterrupted run")
