@@ -182,6 +182,10 @@ struct Organize: AsyncParsableCommand {
                 },
                 progress: { done, total in
                     state.update("Classifying \(done)/\(total)…")
+                },
+                onResume: { already, total in
+                    FileHandle.standardError.write(Data(
+                        "resuming: \(already)/\(total) already classified\n".utf8))
                 }
             )
         } catch Organizer.Error.contextualEmbedderUnavailable {

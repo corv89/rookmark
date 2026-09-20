@@ -187,6 +187,17 @@ public struct Store: Sendable {
         }
     }
 
+    /// Latest run for `sourcePath` that never reached `finishRun` — the resume
+    /// target when `organize --stateful` is re-invoked after a SIGINT or crash.
+    public func latestUnfinishedRun(sourcePath: String) throws -> Int64? {
+        try dbQueue.read { db in
+            try Int64.fetchOne(db, sql: """
+                SELECT id FROM runs WHERE source_path = ? AND status = 'running'
+                ORDER BY id DESC LIMIT 1
+            """, arguments: [sourcePath])
+        }
+    }
+
     public func loadTaxonomy(runID: Int64) throws -> Taxonomy? {
         try dbQueue.read { db in
             guard let row = try Row.fetchOne(db, sql: """

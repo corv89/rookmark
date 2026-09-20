@@ -195,4 +195,51 @@ struct StoreTests {
         #expect(loaded?.metaDescription == "New desc")
         #expect(loaded?.isDeadLink == true)
     }
+
+    // MARK: - latestUnfinishedRun (resume)
+
+    @Test("latestUnfinishedRun is nil on an empty database")
+    func latestUnfinishedEmpty() throws {
+        let store = try makeStore()
+        let unfinished = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(unfinished == nil)
+    }
+
+    @Test("latestUnfinishedRun returns the run after createRun, nil after finishRun")
+    func latestUnfinishedLifecycle() throws {
+        let store = try makeStore()
+        let runID = try store.createRun(sourcePath: "test.html")
+
+        let running = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(running == runID)
+
+        try store.finishRun(runID, taxonomyJSON: "[]")
+        let unfinished = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(unfinished == nil)
+    }
+
+    @Test("latestUnfinishedRun picks the newest of several running runs")
+    func latestUnfinishedPrefersNewest() throws {
+        let store = try makeStore()
+        let first = try store.createRun(sourcePath: "test.html")
+        let second = try store.createRun(sourcePath: "test.html")
+        #expect(first != second)
+
+        let newest = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(newest == second)
+
+        // Once the newest finishes, the older still-'running' run is the
+        // resume target again.
+        try store.finishRun(second, taxonomyJSON: "[]")
+        let remaining = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(remaining == first)
+    }
+
+    @Test("latestUnfinishedRun is scoped to the source path")
+    func latestUnfinishedScopedToSource() throws {
+        let store = try makeStore()
+        _ = try store.createRun(sourcePath: "other.html")
+        let unfinished = try store.latestUnfinishedRun(sourcePath: "test.html")
+        #expect(unfinished == nil)
+    }
 }

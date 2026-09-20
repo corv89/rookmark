@@ -45,7 +45,8 @@ struct ContentView: View {
             // (folder, PDF, json) from ever reaching the model.
             let gate = DispatchSemaphore(value: 0)
             let resolved = Mutex<URL?>(nil)
-            provider.loadObject(ofClass: URL.self) { url, _ in
+            // Discarded: the semaphore + completion handler below own the outcome; the returned Progress has no consumer here.
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 resolved.withLock { $0 = url }
                 gate.signal()
                 guard let url else { return }
@@ -203,7 +204,23 @@ struct ContentView: View {
     // sit here instead of taking a full-width band across the top.
 
     private var sidebar: some View {
-        List(selection: $model.selectedFolder) {
+        // macOS 27 logged "reentrant operation in its NSTableView delegate" once
+        // per launch. Hypothesis: the sidebar List installs while model.rows is
+        // still empty (the scan in RookmarkApp's .task cannot have finished), so
+        // the only row carrying the "All" sentinel tag — rendered under
+        // `if !model.rows.isEmpty` — does not exist, yet selectedFolder already
+        // holds that sentinel: the table starts with a selection id matching no
+        // installed row, and restoreSession()'s row writes land around it. This
+        // wrapper keeps the value the table sees consistent with the rows it has
+        // installed: nil while there is nothing to select (visibleRows treats nil
+        // and the sentinel identically, so filtering is unchanged), the model
+        // value otherwise — the All row is selected the moment rows exist, exactly
+        // as before. The sentinel design and restoreSession() are untouched.
+        // Revert: restore `$model.selectedFolder` if the warning survives this.
+        List(selection: Binding(
+            get: { model.rows.isEmpty ? nil : model.selectedFolder },
+            set: { model.selectedFolder = $0 }
+        )) {
             if let summary = model.sourceSummary {
                 // Counts are formatted explicitly so they agree with each other;
                 // interpolating an Int into Text applies locale grouping while a

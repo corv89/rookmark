@@ -90,6 +90,8 @@ swift run rookmark organize mybookmarks.html \
     --cluster --no-enrich
 ```
 
+Add `--stateful` to checkpoint every classified batch to SQLite — if the run is interrupted, re-running the same command prints `resuming: N/M already classified` and picks up where it stopped.
+
 `organize` writes a new HTML file you re-import from your browser's bookmark
 manager. Other subcommands: `dedup`, `check-links`, `eval`, `worksheet`,
 `import`/`export`/`list`/`search`/`undo`/`status`.

@@ -43,7 +43,10 @@ public struct SessionFactory: Sendable {
     public static let fallbackContextSize = 4096
 
     public var generationOptions: GenerationOptions {
-        GenerationOptions(sampling: .greedy, temperature: 0)
+        // init(sampling:temperature:) is deprecated in the macOS 27 SDK in favor
+        // of init(samplingMode:). Dropping the temperature is behavior-preserving:
+        // greedy sampling never consults it, so `temperature: 0` was redundant.
+        GenerationOptions(samplingMode: .greedy)
     }
 
     public init() {}

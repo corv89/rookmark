@@ -9,6 +9,20 @@ public struct TaxonomyEnvelope: Codable, Sendable {
     }
 }
 
+/// Minimal classification seam so tests can drive `organize` without the
+/// on-device model; the production implementation is `Classifier` itself.
+protocol Classification: Sendable {
+    func classify(
+        _ bookmarks: [Bookmark],
+        taxonomy: Taxonomy,
+        enrichments: [String: ContentEnricher.EnrichResult]?,
+        progress: Classifier.ProgressHandler?,
+        onBatch: Classifier.BatchHandler?
+    ) async throws -> [Classifier.Decision]
+}
+
+extension Classifier: Classification {}
+
 /// Top-level orchestrator wiring the phases together. The CLI's `organize`
 /// command is a thin shell over this.
 public struct Organizer: Sendable {
@@ -68,9 +82,22 @@ public struct Organizer: Sendable {
     }
 
     private let factory: SessionFactory
+    private let makeClassifier: @Sendable (Classifier.Config, TokenBudget, Taxonomy) -> any Classification
 
     public init(factory: SessionFactory = SessionFactory()) {
         self.factory = factory
+        self.makeClassifier = { config, budget, taxonomy in
+            Classifier(factory: factory, config: config, budget: budget, taxonomy: taxonomy)
+        }
+    }
+
+    /// Test seam: inject a deterministic classifier (see OrganizerResumeTests).
+    init(
+        factory: SessionFactory,
+        makeClassifier: @escaping @Sendable (Classifier.Config, TokenBudget, Taxonomy) -> any Classification
+    ) {
+        self.factory = factory
+        self.makeClassifier = makeClassifier
     }
 
     /// One-shot, in-memory by default. With `options.stateful`, route through
@@ -82,6 +109,8 @@ public struct Organizer: Sendable {
 
     public typealias EnrichmentProgressHandler = @Sendable (_ done: Int, _ total: Int) -> Void
     public typealias DeadLinkHandler = @Sendable (_ title: String, _ url: String, _ reason: String) -> Void
+    /// Fired once, before classification starts, when a stateful run is resumed.
+    public typealias ResumeHandler = @Sendable (_ alreadyClassified: Int, _ total: Int) -> Void
 
     public func organize(
         html: String,
@@ -89,7 +118,8 @@ public struct Organizer: Sendable {
         enrichmentProgress: EnrichmentProgressHandler? = nil,
         onDeadLink: DeadLinkHandler? = nil,
         progress: Classifier.ProgressHandler? = nil,
-        onBatch: Classifier.BatchHandler? = nil
+        onBatch: Classifier.BatchHandler? = nil,
+        onResume: ResumeHandler? = nil
     ) async throws -> Result {
         guard case .available = factory.availability() else {
             if case let .unavailable(reason) = factory.availability() {
@@ -103,9 +133,53 @@ public struct Organizer: Sendable {
         let ctx = factory.contextSize()
         let budget = TokenBudget(total: ctx)
 
+        let store: Store?
+        var runID: Int64?
+        var committedDecisions: [Classifier.Decision] = []
+        var priorTaxonomy: Taxonomy?       // the resumed run's stored taxonomy, if any
+        var toClassify = parse.bookmarks   // resume filtering happens AFTER the id-sort above
+        if options.stateful, let path = options.storePath ?? options.sourcePath.map({ $0 + ".db" }) {
+            let s = try Store(path: path)
+            let source = options.sourcePath ?? ""
+            let rid: Int64
+            if let prior = try s.latestUnfinishedRun(sourcePath: source) {
+                rid = prior   // reuse, never a duplicate run
+                let allRows = try s.all(runID: rid)
+                let pendingIDs = Set(try s.uncommitted(runID: rid).map(\.id))
+                // upsert resets committed=0, so only insert ids this run has never
+                // seen; re-upserting would discard the work resume exists to keep.
+                let known = Set(allRows.map(\.id))
+                try s.upsert(parse.bookmarks.filter { !known.contains($0.id) }, runID: rid)
+                committedDecisions = Self.committedDecisions(parse.bookmarks, allRows: allRows, pendingIDs: pendingIDs)
+                toClassify = parse.bookmarks.filter { pendingIDs.contains($0.id) }
+                onResume?(committedDecisions.count, parse.bookmarks.count)
+                // The resumed run must classify AND merge against the SAME folder
+                // vocabulary its committed decisions already use — a freshly generated
+                // taxonomy can rename folders and strand those placements (M11.3).
+                // A pinned taxonomy still wins (resolution below); older DBs with no
+                // stored taxonomy fall back to the fresh build.
+                if options.pinnedTaxonomy == nil {
+                    priorTaxonomy = try? s.loadTaxonomy(runID: rid)
+                }
+            } else {
+                rid = try s.createRun(sourcePath: source)
+                try s.upsert(parse.bookmarks, runID: rid)
+            }
+            try s.snapshot(runID: rid)
+            store = s
+            runID = rid
+        } else {
+            store = nil
+        }
+
+        // Pinned > the resumed run's stored taxonomy > fresh build. Resolved after
+        // the store block so a resume with a stored taxonomy never pays for a
+        // generated one it is about to discard.
         var taxonomy: Taxonomy
         if let pinned = options.pinnedTaxonomy {
             taxonomy = pinned
+        } else if let prior = priorTaxonomy {
+            taxonomy = prior
         } else {
             taxonomy = try await TaxonomyBuilder(factory: factory, budget: budget)
                 .build(from: parse, mode: options.taxonomyMode, folderLanguage: options.clustering.folderLanguage)
@@ -113,19 +187,6 @@ public struct Organizer: Sendable {
 
         if taxonomy.folders.count > options.constrainedFolderCap {
             taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
-        }
-
-        let store: Store?
-        var runID: Int64?
-        if options.stateful, let path = options.storePath ?? options.sourcePath.map({ $0 + ".db" }) {
-            let s = try Store(path: path)
-            let rid = try s.createRun(sourcePath: options.sourcePath ?? "")
-            try s.upsert(parse.bookmarks, runID: rid)
-            try s.snapshot(runID: rid)
-            store = s
-            runID = rid
-        } else {
-            store = nil
         }
 
         var enrichments: [String: ContentEnricher.EnrichResult]?
@@ -154,11 +215,37 @@ public struct Organizer: Sendable {
             }
         }
 
-        let classifier = Classifier(factory: factory, config: classifierConfig, budget: budget, taxonomy: taxonomy)
-        var decisions = try await classifier.classify(
-            parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments,
-            progress: progress, onBatch: onBatch
-        )
+        // Per-batch commit (ImplementationPlan.md §9): compose the caller's onBatch
+        // with a store write so each batch is durable the moment it lands. commit is
+        // an idempotent last-write-wins UPDATE, so Phase 2 revisions simply overwrite.
+        // A failed per-batch commit is non-fatal: the end-of-run commit retries and
+        // an interrupted run just resumes those items.
+        let batchHandler: Classifier.BatchHandler?
+        if let store, let runID {
+            let s = store, r = runID
+            batchHandler = { batch in
+                try? s.commit(batch, runID: r)
+                onBatch?(batch)
+            }
+        } else {
+            batchHandler = onBatch   // stateless: identical closure, zero new work
+        }
+
+        let classifier = makeClassifier(classifierConfig, budget, taxonomy)
+        let newDecisions = try await classifier.classify(
+            toClassify, taxonomy: taxonomy, enrichments: enrichments,
+            progress: progress, onBatch: batchHandler)
+
+        // Merge committed + fresh in parse order — the array an uninterrupted run
+        // would have assembled (determinism guard: parse.bookmarks is id-sorted).
+        var decisions: [Classifier.Decision]
+        if committedDecisions.isEmpty {
+            decisions = newDecisions
+        } else {
+            let newByID = Dictionary(uniqueKeysWithValues: newDecisions.map { ($0.bookmarkID, $0) })
+            let committedByID = Dictionary(uniqueKeysWithValues: committedDecisions.map { ($0.bookmarkID, $0) })
+            decisions = parse.bookmarks.compactMap { newByID[$0.id] ?? committedByID[$0.id] }
+        }
 
 
         if options.clustering.enabled {
@@ -211,11 +298,11 @@ public struct Organizer: Sendable {
                             taxonomy = TaxonomyBuilder.pruneToCap(taxonomy, cap: options.constrainedFolderCap)
                         }
 
-                        let reClassifier = Classifier(factory: factory, config: options.classifier, budget: budget, taxonomy: taxonomy)
+                        let reClassifier = makeClassifier(options.classifier, budget, taxonomy)
                         // Re-placements revise rows the UI already showed, so they
                         // go out through onBatch too.
                         let residueDecisions = try await reClassifier.classify(
-                            residue, taxonomy: taxonomy, onBatch: onBatch
+                            residue, taxonomy: taxonomy, enrichments: nil, progress: nil, onBatch: batchHandler
                         )
 
                         let residueDecisionMap = Dictionary(uniqueKeysWithValues: residueDecisions.map { ($0.bookmarkID, $0) })
@@ -284,5 +371,22 @@ public struct Organizer: Sendable {
             enrichmentCount: enrichmentCount,
             decisions: decisions
         )
+    }
+
+    /// Rebuilds the run's committed decisions, in `bookmarks` order, from stored
+    /// rows. `modelChosenFolder` is not persisted; it is GUI-only explain-data
+    /// and is regenerated by Phase 2 for anything re-classified.
+    private static func committedDecisions(
+        _ bookmarks: [Bookmark], allRows: [Bookmark], pendingIDs: Set<String>
+    ) -> [Classifier.Decision] {
+        let byID = Dictionary(uniqueKeysWithValues:
+            allRows.filter { !pendingIDs.contains($0.id) }.map { ($0.id, $0) })
+        return bookmarks.compactMap { b in
+            guard let row = byID[b.id] else { return nil }
+            return Classifier.Decision(
+                bookmarkID: b.id,
+                folder: row.assignedFolder ?? Taxonomy.unsorted,
+                confidence: row.confidence ?? 0)
+        }
     }
 }
