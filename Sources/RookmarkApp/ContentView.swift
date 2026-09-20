@@ -557,25 +557,31 @@ struct ContentView: View {
                             .multilineTextAlignment(.center)
                     }
 
-                    // Four fixed columns against eight cards, so the grid is
-                    // always a full 4×2 block. An adaptive column count reflows
-                    // to three at narrow widths and strands two cards on a short
-                    // last row; a fixed count squeezes the cards instead, which
-                    // the captions already tolerate (they wrap to two lines).
+                    // A fixed column count, chosen from the number of cards, so
+                    // the last row is never short. The count varies with what
+                    // is installed, so this cannot be a constant.
                     LazyVGrid(
                         columns: Array(
-                            repeating: GridItem(.flexible(minimum: 118), spacing: 10),
-                            count: 4
+                            repeating: GridItem(
+                                .flexible(minimum: 118, maximum: Self.cardMaxWidth),
+                                spacing: Self.cardSpacing
+                            ),
+                            count: columnCount
                         ),
-                        spacing: 10
+                        spacing: Self.cardSpacing
                     ) {
-                        ForEach(BrowserSource.all) { browser in
+                        ForEach(installedSources) { browser in
                             sourceCard(browser)
                         }
                         otherFileCard
                     }
+                    .frame(width: gridWidth)
 
                     VStack(spacing: 6) {
+                        Label(
+                            "Only browsers installed on this Mac are listed. Anything else works through Other browser.",
+                            systemImage: "macwindow"
+                        )
                         Label(
                             "Or drag a bookmarks export onto this window.",
                             systemImage: "arrow.down.doc"
@@ -595,7 +601,7 @@ struct ContentView: View {
                     .frame(maxWidth: 480)
                 }
                 .padding(24)
-                .frame(maxWidth: 760)
+                .frame(maxWidth: max(gridWidth, 480))
                 .background(
                     RoundedRectangle(cornerRadius: 14)
                         .strokeBorder(
@@ -612,6 +618,47 @@ struct ContentView: View {
                 .frame(minHeight: geometry.size.height, alignment: .center)
             }
         }
+    }
+
+    // MARK: welcome grid layout
+    //
+    // The card count is whatever is installed, so the grid geometry is derived
+    // rather than constant: a fixed four columns would strand a short last row
+    // on most machines.
+
+    private static let cardMaxWidth: CGFloat = 186
+    private static let cardSpacing: CGFloat = 10
+
+    /// Only the browsers this Mac actually has, plus the catch-all. A browser
+    /// Rookmark cannot draw the real icon for is not shown at all: an SF Symbol
+    /// standing in for a company's logo never reads as that company, so the
+    /// card would be claiming to be something it isn't. Whatever is left out
+    /// is still importable through "Other browser", which needs no logo to be
+    /// honest about what it does.
+    private var installedSources: [BrowserSource] {
+        BrowserSource.all.filter(\.isInstalled)
+    }
+
+    /// Including the catch-all card, which is always last.
+    private var cardCount: Int { installedSources.count + 1 }
+
+    /// The largest count up to four that divides the cards evenly, so the last
+    /// row is full. A small count goes on one row; a count with no such divisor
+    /// (seven cards — six browsers plus the catch-all) falls back to four and
+    /// accepts one short row, which beats a row of seven slivers.
+    private var columnCount: Int {
+        if cardCount <= 5 { return max(cardCount, 1) }
+        for candidate in stride(from: 4, through: 2, by: -1) where cardCount % candidate == 0 {
+            return candidate
+        }
+        return 4
+    }
+
+    /// Pinned rather than left to fill: flexible columns with no width cap
+    /// stretch two or three cards across the whole panel.
+    private var gridWidth: CGFloat {
+        let columns = CGFloat(columnCount)
+        return columns * Self.cardMaxWidth + (columns - 1) * Self.cardSpacing
     }
 
     /// One browser. Orion's card runs the real importer when the profile is
@@ -634,7 +681,9 @@ struct ContentView: View {
                 icon: browser.icon,
                 title: browser.name,
                 caption: live ? "Read automatically" : browser.shortExportPath,
-                tint: browser.tint
+                // Only consulted by the symbol fallback, which a browser card
+                // reaches solely in the profile-outlived-the-app case.
+                tint: .accentColor
             )
         }
         .buttonStyle(SourceCardStyle())
@@ -666,8 +715,10 @@ struct ContentView: View {
 
     private func cardLabel(icon: BrowserSource.Icon, title: String, caption: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // The icon box lives inside Icon.view so the two cases cannot
+            // diverge: a frame applied here and not there is exactly what left
+            // the real-icon cards sitting differently from the symbol ones.
             icon.view(tint: tint)
-                .frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -968,10 +1019,6 @@ private struct BrowserSource: Identifiable {
     /// real icon.
     let id: String
     let name: String
-    /// Drawn when the app is not installed. No brand assets ship with Rookmark,
-    /// and none are downloaded, so an absent browser falls back to a symbol.
-    let symbol: String
-    let tint: Color
     /// The full path through that browser's menus, for the panel and tooltip.
     let exportPath: String
     /// The same instruction trimmed to fit a card. Firefox's real path is three
@@ -981,10 +1028,11 @@ private struct BrowserSource: Identifiable {
     var readsProfileDirectly = false
 
     /// Orion leads because it is the one source that needs no export at all.
-    /// The rest are in rough order of how many Macs have them.
+    /// The rest are in rough order of how many Macs have them. Being in this
+    /// list is not enough to appear on screen — see `isInstalled`.
     static let all: [BrowserSource] = [
         BrowserSource(
-            id: "com.kagi.kagimacOS", name: "Orion", symbol: "sparkles", tint: .purple,
+            id: "com.kagi.kagimacOS", name: "Orion",
             // The export path still has to be right: `readsProfileDirectly`
             // only wins when a profile is actually installed, and on a Mac
             // without Orion this card is an ordinary export card.
@@ -993,65 +1041,88 @@ private struct BrowserSource: Identifiable {
             readsProfileDirectly: true
         ),
         BrowserSource(
-            id: "com.apple.Safari", name: "Safari", symbol: "safari", tint: .blue,
+            id: "com.apple.Safari", name: "Safari",
             exportPath: "File ▸ Export ▸ Bookmarks",
             shortExportPath: "File ▸ Export Bookmarks"
         ),
         BrowserSource(
-            id: "com.google.Chrome", name: "Chrome", symbol: "circle.circle.fill", tint: .green,
+            id: "com.google.Chrome", name: "Chrome",
             exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
             shortExportPath: "Bookmark Manager ▸ Export"
         ),
         BrowserSource(
-            id: "org.mozilla.firefox", name: "Firefox", symbol: "flame.fill", tint: .orange,
+            id: "org.mozilla.firefox", name: "Firefox",
             exportPath: "Bookmarks ▸ Manage Bookmarks ▸ Import and Backup ▸ Export Bookmarks to HTML",
             // Truncated at card width when it carried "to HTML" as well; the
             // full three-menu path is in the tooltip and the open panel.
             shortExportPath: "Manage Bookmarks ▸ Export"
         ),
         BrowserSource(
-            id: "com.brave.Browser", name: "Brave", symbol: "shield.lefthalf.filled", tint: .red,
+            id: "com.brave.Browser", name: "Brave",
             exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
             shortExportPath: "Bookmark Manager ▸ Export"
         ),
         BrowserSource(
-            id: "com.microsoft.edgemac", name: "Edge", symbol: "globe.europe.africa.fill", tint: .teal,
+            id: "com.microsoft.edgemac", name: "Edge",
             exportPath: "Favourites ▸ Manage favourites ▸ ⋯ ▸ Export favourites",
             shortExportPath: "Manage favourites ▸ Export"
         ),
         BrowserSource(
-            id: "com.vivaldi.Vivaldi", name: "Vivaldi", symbol: "circle.hexagongrid.fill", tint: .pink,
+            id: "com.vivaldi.Vivaldi", name: "Vivaldi",
             exportPath: "File ▸ Export Bookmarks",
             shortExportPath: "File ▸ Export Bookmarks"
         ),
     ]
 
+    /// Whether this browser earns a card. The test is the real icon, not a
+    /// hand-kept list of install locations: LaunchServices already knows where
+    /// apps are (it covers /Applications, ~/Applications and everywhere else
+    /// an app can legitimately live, and stays in sync with Spotlight), and
+    /// having the icon is exactly the condition for drawing an honest card.
     @MainActor
-    var icon: Icon {
-        BrowserIconCache.icon(for: id).map(Icon.app) ?? .symbol(symbol)
+    var isInstalled: Bool {
+        if BrowserIconCache.icon(for: id) != nil { return true }
+        // One exception: a profile can outlive the app it belongs to, and the
+        // live importer still reads it. Hiding a source that actually loads
+        // would be worse than the generic icon this falls back to.
+        return readsProfileDirectly && OrionImporter.defaultFavouritesURL() != nil
     }
 
-    /// The installed app's own icon when there is one, a symbol otherwise. The
-    /// real icon is what makes the grid scannable — it is the thing the user
-    /// already recognizes in their Dock — and it costs nothing to ship.
+    @MainActor
+    var icon: Icon {
+        // The fallback is reachable only through the profile-outlived-the-app
+        // case above: every other card is gated on the real icon existing, so
+        // no symbol ever stands in for a company's logo. That substitution is
+        // what made the grid look wrong — a green ring is not Chrome's mark,
+        // and no SF Symbol ever will be.
+        BrowserIconCache.icon(for: id).map(Icon.app) ?? .symbol("bookmark.fill")
+    }
+
+    /// The installed app's own icon — the thing the user already recognizes in
+    /// their Dock — or, for the two cards that stand for no particular brand
+    /// ("Other browser", and a profile whose app is gone), a symbol.
     enum Icon {
         case app(NSImage)
         case symbol(String)
 
-        @ViewBuilder
+        /// Both cases end up in the same box, leading-aligned: the frame lives
+        /// here, once, because applying it to one case and not the other is
+        /// precisely what made real-icon cards sit differently from symbol ones.
         func view(tint: Color) -> some View {
-            switch self {
-            case .app(let image):
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-            case .symbol(let name):
-                Image(systemName: name)
-                    .font(.system(size: 21))
-                    .foregroundStyle(tint)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            Group {
+                switch self {
+                case .app(let image):
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                case .symbol(let name):
+                    Image(systemName: name)
+                        .font(.system(size: 21))
+                        .foregroundStyle(tint)
+                }
             }
+            .frame(width: 26, height: 26, alignment: .leading)
         }
     }
 }
