@@ -181,10 +181,26 @@ public struct Organizer: Sendable {
             }
         }
 
+        // Per-batch commit (ImplementationPlan.md §9): compose the caller's onBatch
+        // with a store write so each batch is durable the moment it lands. commit is
+        // an idempotent last-write-wins UPDATE, so Phase 2 revisions simply overwrite.
+        // A failed per-batch commit is non-fatal: the end-of-run commit retries and
+        // an interrupted run just resumes those items.
+        let batchHandler: Classifier.BatchHandler?
+        if let store, let runID {
+            let s = store, r = runID
+            batchHandler = { batch in
+                try? s.commit(batch, runID: r)
+                onBatch?(batch)
+            }
+        } else {
+            batchHandler = onBatch   // stateless: identical closure, zero new work
+        }
+
         let classifier = makeClassifier(classifierConfig, budget, taxonomy)
         var decisions = try await classifier.classify(
             parse.bookmarks, taxonomy: taxonomy, enrichments: enrichments,
-            progress: progress, onBatch: onBatch
+            progress: progress, onBatch: batchHandler
         )
 
 
@@ -242,7 +258,7 @@ public struct Organizer: Sendable {
                         // Re-placements revise rows the UI already showed, so they
                         // go out through onBatch too.
                         let residueDecisions = try await reClassifier.classify(
-                            residue, taxonomy: taxonomy, enrichments: nil, progress: nil, onBatch: onBatch
+                            residue, taxonomy: taxonomy, enrichments: nil, progress: nil, onBatch: batchHandler
                         )
 
                         let residueDecisionMap = Dictionary(uniqueKeysWithValues: residueDecisions.map { ($0.bookmarkID, $0) })
