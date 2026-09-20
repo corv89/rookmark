@@ -25,6 +25,9 @@ struct Organize: AsyncParsableCommand {
     @Option(name: .customLong("confidence-floor"), help: "Minimum confidence (0-100) to accept a classification. Items below this are routed to Unsorted. Set to 0 to disable.")
     var confidenceFloor: Int = 15
 
+    @Option(name: .customLong("max-concurrency"), help: "Batches classified in flight at once (sliding window). 1 = old sequential path.")
+    var maxConcurrency: Int = 4
+
     @Flag(help: "Enable Phase 2 clustering to propose new folders for unsorted bookmarks.")
     var cluster = false
 
@@ -141,7 +144,7 @@ struct Organize: AsyncParsableCommand {
         let organizer = Organizer()
         let opts = Organizer.Options(
             taxonomyMode: fresh ? .fresh : taxMode,
-            classifier: .init(initialBatchSize: batchSize, confidenceFloor: confidenceFloor),
+            classifier: .init(initialBatchSize: batchSize, confidenceFloor: confidenceFloor, maxConcurrency: maxConcurrency),
             stateful: stateful,
             sourcePath: input,
             clustering: clusteringConfig,
