@@ -59,8 +59,35 @@ PLIST
 # Refresh the icon cache, otherwise Finder keeps showing the generic icon.
 touch "$APP"
 
+# Signing the bundle (rather than leaving only the linker's implicit ad-hoc
+# signature on the raw binary inside it) is worth doing regardless: it seals
+# the whole .app as one unit instead of a loose binary plus unsealed
+# Resources. What it does NOT do, even with a fixed --identifier, is make a
+# Full Disk Access grant survive a rebuild — ad-hoc signatures carry no
+# verifiable identity (anyone can claim any --identifier), so TCC ties the
+# grant to the actual signing hash underneath, which changes every time the
+# binary's contents do. Only a real signing identity (a paid Developer ID, or
+# a free local one you create once) gives TCC something to trust across
+# rebuilds. Set ROOKMARK_CODESIGN_IDENTITY to use one:
+#
+#   Keychain Access ▸ Certificate Assistant ▸ Create a Certificate…
+#     Identity Type: Self Signed Root · Certificate Type: Code Signing
+#   then: ROOKMARK_CODESIGN_IDENTITY="Your Certificate Name" ./scripts/make-app.sh
+#
+# With no identity set, this falls back to ad-hoc — fine for a one-off run,
+# but expect to re-grant Full Disk Access after every rebuild until you set
+# one up.
+IDENTITY="${ROOKMARK_CODESIGN_IDENTITY:--}"
+echo "Signing ($([ "$IDENTITY" = "-" ] && echo "ad hoc — grants will not survive the next rebuild" || echo "$IDENTITY"))…"
+codesign --force --deep --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP"
+
 echo "Built $APP"
 echo "Run it:  open $APP"
+if [ "$IDENTITY" = "-" ]; then
+    echo "Ad hoc signed: if you grant Full Disk Access now, expect to re-grant it"
+    echo "again after your next rebuild. Set ROOKMARK_CODESIGN_IDENTITY to a local"
+    echo "code-signing certificate (see comments in this script) to avoid that."
+fi
 echo
 echo "To distribute, sign and notarize:"
 echo "  codesign --deep --force --options runtime --sign \"Developer ID Application: ...\" $APP"
