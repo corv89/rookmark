@@ -8,6 +8,7 @@ struct ContentView: View {
     @Bindable var model: OrganizerModel
     @State private var exportedPath: String?
     @State private var settingsLinkFailed = false
+    @State private var fullDiskAccessLinkFailed = false
     @State private var isDropTargeted = false
     @State private var isEditingFolders = false
 
@@ -78,14 +79,15 @@ struct ContentView: View {
         .confirmationDialog(
             "Replace the run on screen?",
             isPresented: Binding(
-                get: { model.pendingOrionProfile },
-                set: { if !$0 { model.cancelOrionProfile() } }
+                get: { model.pendingProfile != nil },
+                set: { if !$0 { model.cancelProfile() } }
             ),
-            titleVisibility: .visible
-        ) {
-            Button("Use the Orion profile", role: .destructive) { model.confirmOrionProfile() }
-            Button("Cancel", role: .cancel) { model.cancelOrionProfile() }
-        } message: {
+            titleVisibility: .visible,
+            presenting: model.pendingProfile
+        ) { profile in
+            Button("Use the \(profile.name)", role: .destructive) { model.confirmProfile() }
+            Button("Cancel", role: .cancel) { model.cancelProfile() }
+        } message: { _ in
             Text("The run from \(model.sourceName) will be discarded. Export it first if you still want it.")
         }
         .confirmationDialog(
@@ -130,21 +132,23 @@ struct ContentView: View {
         }
 
         ToolbarItem {
-            // Hidden when the profile is missing or already loaded; the button would
-            // otherwise be a dead control. defaultFavouritesURL is one stat call when
-            // the profile exists, so evaluating it in the toolbar is cheap.
-            // Also hidden with nothing loaded at all: the welcome grid has its own
-            // Orion card right there, so a second one in the toolbar is noise.
-            if OrionImporter.defaultFavouritesURL() != nil,
-               model.source != nil, model.source != .orionProfile {
-                Button {
-                    model.requestOrionProfile()
+            // Every browser Rookmark reads in place, minus the one already
+            // loaded: those would be dead controls. Hidden with nothing loaded
+            // at all, because the welcome grid has a card for each of them
+            // right there. Locating the profiles is cached (LiveProfileCache),
+            // so rebuilding the toolbar during a run costs nothing.
+            let others = liveSources.filter { $0 != model.source }
+            if model.source != nil, !others.isEmpty {
+                Menu {
+                    ForEach(others, id: \.name) { profile in
+                        Button(profile.name) { model.requestProfile(profile) }
+                    }
                 } label: {
-                    Label("Use Orion profile", systemImage: "arrow.uturn.backward")
+                    Label("Use a browser profile", systemImage: "arrow.uturn.backward")
                         .labelStyle(.titleAndIcon)
                 }
                 .disabled(model.isBusy)
-                .help("Go back to the bookmarks in the installed Orion profile, without relaunching.")
+                .help("Switch to the bookmarks in an installed browser profile, without relaunching.")
             }
         }
 
@@ -415,6 +419,7 @@ struct ContentView: View {
         default:
             VStack(spacing: 0) {
                 importFailureBanner
+                sourceAccessBanner
                 availabilityBanner
                 statusBanner
                 resultsTable
@@ -594,6 +599,10 @@ struct ContentView: View {
                             Label(reason, systemImage: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
                         }
+                        // Sits with the grid rather than in a banner above it:
+                        // the card that raises it is right here, and the notice
+                        // is what that card's caption is pointing at.
+                        sourceAccessNotice
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -650,6 +659,12 @@ struct ContentView: View {
         BrowserSource.all.filter(\.isInstalled)
     }
 
+    /// Every profile on this Mac that Rookmark can read in place, in the grid's
+    /// own order. Drives the toolbar's profile menu.
+    private var liveSources: [OrganizerModel.Source] {
+        BrowserSource.all.compactMap(\.liveSource)
+    }
+
     /// Including the catch-all card, which is always last.
     private var cardCount: Int { installedSources.count + 1 }
 
@@ -679,18 +694,24 @@ struct ContentView: View {
         max(gridWidth, 440) + Self.panelInset * 2
     }
 
-    /// One browser. Orion's card runs the real importer when the profile is
-    /// installed; every other browser has no native importer, so the card opens
+    /// One browser. A browser whose profile Rookmark found runs the real
+    /// importer; a browser with no readable profile and none installed opens
     /// the panel already carrying that browser's own export path — the
     /// instruction arrives with the file chooser rather than in a wall of hints
-    /// the user has to match to their browser themselves.
+    /// the user has to match to their browser themselves. Any live browser can
+    /// land in a third state between the two: the profile is right there and
+    /// only Full Disk Access is missing, so the card says so and the click
+    /// explains the fix rather than quietly demoting it to an export.
     private func sourceCard(_ browser: BrowserSource) -> some View {
-        let live = browser.readsProfileDirectly && OrionImporter.defaultFavouritesURL() != nil
+        let live = browser.liveSource
+        let needsAccess = browser.needsFullDiskAccess
         return Button {
-            if live {
+            if let live {
                 // Safe from here: with no source loaded the guard in
-                // requestOrionProfile falls straight through to the load.
-                model.requestOrionProfile()
+                // requestProfile falls straight through to the load.
+                model.requestProfile(live)
+            } else if needsAccess {
+                model.reportFullDiskAccessRequired(for: browser.name)
             } else {
                 chooseFile(for: browser)
             }
@@ -698,7 +719,9 @@ struct ContentView: View {
             cardLabel(
                 icon: browser.icon,
                 title: browser.name,
-                caption: live ? "Read automatically" : browser.shortExportPath,
+                caption: live != nil
+                    ? "Read automatically"
+                    : needsAccess ? "Needs Full Disk Access" : browser.shortExportPath,
                 // Only consulted by the symbol fallback, which a browser card
                 // reaches solely in the profile-outlived-the-app case.
                 tint: .accentColor
@@ -706,8 +729,10 @@ struct ContentView: View {
         }
         .buttonStyle(SourceCardStyle())
         .disabled(model.isBusy)
-        .help(live
-              ? "Read the bookmarks in the installed Orion profile. Nothing to export."
+        .help(live != nil
+              ? "Read the bookmarks in the installed \(browser.name) profile. Nothing to export."
+              : needsAccess
+              ? "\(browser.name)'s bookmarks are on this Mac but Rookmark isn't allowed to read them yet. Grant Full Disk Access in System Settings."
               : "In \(browser.name): \(browser.exportPath). Then choose the file it wrote.")
     }
 
@@ -821,6 +846,73 @@ struct ContentView: View {
               NSWorkspace.shared.open(url)
         else {
             settingsLinkFailed = true
+            return
+        }
+    }
+
+    /// The welcome grid's version: no glass capsule, because it lives inside
+    /// the panel's own caption stack under the cards.
+    @ViewBuilder
+    private var sourceAccessNotice: some View {
+        if case .denied(let reason, let showsSettingsLink) = model.sourceAccess {
+            Label(reason, systemImage: "lock.trianglebadge.exclamationmark.fill")
+                .foregroundStyle(.orange)
+            if showsSettingsLink {
+                fullDiskAccessButton
+            }
+        }
+    }
+
+    /// Compact version when a table is on screen — a profile switch that hit
+    /// the permission wall mid-run, which the run itself survives.
+    @ViewBuilder
+    private var sourceAccessBanner: some View {
+        if case .denied(let reason, let showsSettingsLink) = model.sourceAccess {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.trianglebadge.exclamationmark.fill")
+                    .foregroundStyle(.orange)
+                    .imageScale(.small)
+                Text(reason)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if showsSettingsLink {
+                    fullDiskAccessButton
+                }
+                Button("OK") { model.dismissSourceAccessNotice() }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .glassEffect(.regular.tint(.orange.opacity(0.18)), in: .capsule)
+            .padding(.bottom, 10)
+            .frame(maxWidth: 720)
+        }
+    }
+
+    /// Same deep-link-or-text idiom the Apple Intelligence notice uses: the
+    /// reason string already names the pane, so a link that doesn't resolve
+    /// degrades to showing the path.
+    @ViewBuilder
+    private var fullDiskAccessButton: some View {
+        if fullDiskAccessLinkFailed {
+            Text("System Settings ▸ Privacy & Security ▸ Full Disk Access")
+                .font(.caption.weight(.medium))
+        } else {
+            Button("Open Full Disk Access settings") {
+                openFullDiskAccessSettings()
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+        }
+    }
+
+    private func openFullDiskAccessSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"),
+              NSWorkspace.shared.open(url)
+        else {
+            fullDiskAccessLinkFailed = true
             return
         }
     }
@@ -1027,12 +1119,21 @@ struct ContentView: View {
 
 /// One browser on the welcome grid.
 ///
-/// Only Orion has a native importer (`OrionImporter` reads its profile
-/// directly); every other browser reaches Rookmark as an HTML export, so what
-/// distinguishes these entries is almost entirely *where that browser hides its
-/// Export Bookmarks command*. That string is the payload — shown on the card,
-/// repeated in the open panel, and in the tooltip in full.
+/// Most of these have a native importer that reads the browser's own profile
+/// (see `Live`); anything not listed reaches Rookmark as an HTML export, so
+/// what distinguishes those entries is almost entirely *where that browser
+/// hides its Export Bookmarks command*. That string is the payload — shown on
+/// the card, repeated in the open panel, and in the tooltip in full. It is
+/// still carried by the live browsers too: `live` only wins where a profile is
+/// actually readable, and a card whose profile isn't is an export card.
 private struct BrowserSource: Identifiable {
+    /// A browser whose profile Rookmark reads in place. Orion is spelled
+    /// separately because it has its own `Source` case.
+    enum Live: Hashable {
+        case orion
+        case browser(OrganizerModel.LiveBrowser)
+    }
+
     /// The bundle id, which doubles as the lookup key for the installed app's
     /// real icon.
     let id: String
@@ -1042,55 +1143,85 @@ private struct BrowserSource: Identifiable {
     /// The same instruction trimmed to fit a card. Firefox's real path is three
     /// menus deep and does not fit anywhere sensible at card width.
     let shortExportPath: String
-    /// Orion only: there is a live importer, so this card skips the export step.
-    var readsProfileDirectly = false
+    /// Nil for the browsers that can only be exported.
+    var live: Live?
 
-    /// Orion leads because it is the one source that needs no export at all.
-    /// The rest are in rough order of how many Macs have them. Being in this
-    /// list is not enough to appear on screen — see `isInstalled`.
+    /// Orion leads because it was the first source that needed no export at
+    /// all. The rest are in rough order of how many Macs have them. Being in
+    /// this list is not enough to appear on screen — see `isInstalled`.
     static let all: [BrowserSource] = [
         BrowserSource(
             id: "com.kagi.kagimacOS", name: "Orion",
-            // The export path still has to be right: `readsProfileDirectly`
-            // only wins when a profile is actually installed, and on a Mac
-            // without Orion this card is an ordinary export card.
+            // The export path still has to be right: `live` only wins when a
+            // profile is actually installed, and on a Mac without Orion this
+            // card is an ordinary export card.
             exportPath: "File ▸ Export ▸ Bookmarks",
             shortExportPath: "File ▸ Export Bookmarks",
-            readsProfileDirectly: true
+            live: .orion
         ),
         BrowserSource(
             id: "com.apple.Safari", name: "Safari",
             exportPath: "File ▸ Export ▸ Bookmarks",
-            shortExportPath: "File ▸ Export Bookmarks"
+            shortExportPath: "File ▸ Export Bookmarks",
+            live: .browser(.safari)
         ),
         BrowserSource(
             id: "com.google.Chrome", name: "Chrome",
             exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
-            shortExportPath: "Bookmark Manager ▸ Export"
+            shortExportPath: "Bookmark Manager ▸ Export",
+            live: .browser(.chrome)
         ),
         BrowserSource(
             id: "org.mozilla.firefox", name: "Firefox",
             exportPath: "Bookmarks ▸ Manage Bookmarks ▸ Import and Backup ▸ Export Bookmarks to HTML",
             // Truncated at card width when it carried "to HTML" as well; the
             // full three-menu path is in the tooltip and the open panel.
-            shortExportPath: "Manage Bookmarks ▸ Export"
+            shortExportPath: "Manage Bookmarks ▸ Export",
+            live: .browser(.firefox)
         ),
         BrowserSource(
             id: "com.brave.Browser", name: "Brave",
             exportPath: "Bookmarks ▸ Bookmark Manager ▸ ⋮ ▸ Export bookmarks",
-            shortExportPath: "Bookmark Manager ▸ Export"
+            shortExportPath: "Bookmark Manager ▸ Export",
+            live: .browser(.brave)
         ),
         BrowserSource(
             id: "com.microsoft.edgemac", name: "Edge",
             exportPath: "Favourites ▸ Manage favourites ▸ ⋯ ▸ Export favourites",
-            shortExportPath: "Manage favourites ▸ Export"
+            shortExportPath: "Manage favourites ▸ Export",
+            live: .browser(.edge)
         ),
         BrowserSource(
             id: "com.vivaldi.Vivaldi", name: "Vivaldi",
             exportPath: "File ▸ Export Bookmarks",
-            shortExportPath: "File ▸ Export Bookmarks"
+            shortExportPath: "File ▸ Export Bookmarks",
+            live: .browser(.vivaldi)
         ),
     ]
+
+    /// The source this card loads without an export, or nil when this Mac has
+    /// no readable profile for it — in which case the card falls back to the
+    /// export path, unless `needsFullDiskAccess` says the profile is there and
+    /// only a permission is missing.
+    @MainActor
+    var liveSource: OrganizerModel.Source? {
+        guard case .source(let source) = location else { return nil }
+        return source
+    }
+
+    /// A live browser whose profile is on this Mac but Rookmark has not been
+    /// granted Full Disk Access to read it. A card in this state offers the
+    /// fix rather than the export path: the user is one System Settings pane
+    /// from reading the profile in place.
+    @MainActor
+    var needsFullDiskAccess: Bool {
+        location == .needsFullDiskAccess
+    }
+
+    @MainActor
+    private var location: LiveProfileCache.Location {
+        live.map(LiveProfileCache.location(for:)) ?? .missing
+    }
 
     /// Whether this browser earns a card. The test is the real icon, not a
     /// hand-kept list of install locations: LaunchServices already knows where
@@ -1103,7 +1234,7 @@ private struct BrowserSource: Identifiable {
         // One exception: a profile can outlive the app it belongs to, and the
         // live importer still reads it. Hiding a source that actually loads
         // would be worse than the generic icon this falls back to.
-        return readsProfileDirectly && OrionImporter.defaultFavouritesURL() != nil
+        return liveSource != nil
     }
 
     @MainActor
@@ -1142,6 +1273,43 @@ private struct BrowserSource: Identifiable {
             }
             .frame(width: 26, height: 26, alignment: .leading)
         }
+    }
+}
+
+/// Locating a profile costs a few file reads — more for Firefox, which has two
+/// ini files to consult — and both the grid (on every hover) and the toolbar
+/// (on every progress tick) ask repeatedly. Cached for the same reason the icon
+/// lookup is, and with the same consequence: a browser installed while Rookmark
+/// is on screen is picked up at the next launch.
+@MainActor
+private enum LiveProfileCache {
+    /// Three outcomes rather than an optional source, because "no profile" and
+    /// "a profile I'm not allowed to open" call for different cards: the first
+    /// falls back to that browser's export path, the second offers the
+    /// permission that would make the export unnecessary.
+    enum Location: Equatable {
+        case source(OrganizerModel.Source)
+        case needsFullDiskAccess
+        case missing
+    }
+
+    private static var cache: [BrowserSource.Live: Location] = [:]
+
+    static func location(for live: BrowserSource.Live) -> Location {
+        if let cached = cache[live] { return cached }
+        let location: Location
+        switch live {
+        case .orion:
+            location = OrionImporter.defaultFavouritesURL().map { _ in .source(.orionProfile) } ?? .missing
+        case .browser(let browser):
+            if let url = browser.profileURL() {
+                location = .source(.liveProfile(browser, url))
+            } else {
+                location = browser.isBlockedByPermissions ? .needsFullDiskAccess : .missing
+            }
+        }
+        cache[live] = location
+        return location
     }
 }
 

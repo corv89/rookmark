@@ -16,6 +16,18 @@ struct ImportSourceTests {
         #expect(OrganizerModel.Source.file(export).name == "bookmarks_2026.html")
     }
 
+    @Test("every live profile is named for its browser")
+    func liveProfileNaming() {
+        let path = URL(filePath: "/tmp/profile")
+        #expect(OrganizerModel.Source.liveProfile(.chrome, path).name == "Chrome profile")
+        #expect(OrganizerModel.Source.liveProfile(.firefox, path).name == "Firefox profile")
+        // Every case is named: an unnamed browser would show as a blank library
+        // in the sidebar, which is the one thing Source.name exists to prevent.
+        for browser in OrganizerModel.LiveBrowser.allCases {
+            #expect(OrganizerModel.Source.liveProfile(browser, path).name == "\(browser.name) profile")
+        }
+    }
+
     @Test("html and htm are importable, anything else is not")
     func importable() {
         let dir = URL(filePath: "/tmp/exports")
@@ -164,6 +176,247 @@ struct ImportSourceTests {
         #expect(model.importFailureMessage?.contains(bad.lastPathComponent) == true)
         model.dismissImportFailure()
         #expect(model.importFailureMessage == nil)
+    }
+
+    // MARK: live browser profiles, through the real importers
+
+    /// A Chromium `Bookmarks` file, which is what `.liveProfile(.chrome, _)`
+    /// dispatches to. `.invalid` hosts for the same reason the export fixtures
+    /// use them: ids come from the URL, so a real host can collide with the
+    /// host machine's own session snapshot.
+    private func writeChromiumProfile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "rookmark-chromium-\(UUID().uuidString).json")
+        try """
+        {"version":1,"roots":{"bookmark_bar":{"type":"folder","name":"Bookmarks bar","children":[
+            {"type":"url","name":"A","url":"https://rookmark-live-test.invalid/a"},
+            {"type":"url","name":"B","url":"https://rookmark-live-test.invalid/b"}
+        ]}}}
+        """.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    @Test("a live Chrome profile loads through the Chromium importer")
+    func loadsLiveProfile() async throws {
+        let url = try writeChromiumProfile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = OrganizerModel(persistingSessions: false)
+        await model.loadProfile(.liveProfile(.chrome, url), discardingSession: false)
+
+        #expect(model.phase == .idle)
+        #expect(model.source == .liveProfile(.chrome, url))
+        #expect(model.sourceName == "Chrome profile")
+        #expect(model.allBookmarks.count == 2)
+        #expect(model.sourceSummary?.bookmarkCount == 2)
+        // Orion's own irregularity, which a real tree cannot have.
+        #expect(model.sourceSummary?.orphanedFolderReferences == nil)
+        #expect(model.allBookmarks.first?.originalFolderPath == ["Bookmarks bar"])
+    }
+
+    @Test("a live profile that cannot be read rolls the model back and keeps the run")
+    func failedLiveProfileRollsBack() async throws {
+        let url = try writeChromiumProfile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = OrganizerModel(persistingSessions: false)
+        await model.loadProfile(.liveProfile(.chrome, url), discardingSession: false)
+        let bookmark = try #require(model.allBookmarks.first)
+        model.updateRows([.init(id: bookmark.id, title: "A", url: bookmark.url,
+                                folder: "Development", confidence: 90, modelChoice: nil)])
+
+        // A profile that was there when the card offered it and is gone by the
+        // time it loads: the same rollback the file path gets.
+        let missing = URL(filePath: "/tmp/rookmark-no-such-profile/places.sqlite")
+        await model.loadProfile(.liveProfile(.firefox, missing), discardingSession: false)
+
+        #expect(model.source == .liveProfile(.chrome, url), "the library on screen survives")
+        #expect(model.allBookmarks.count == 2)
+        #expect(model.rows.map(\.id) == [bookmark.id])
+        #expect(model.importFailureMessage != nil)
+    }
+
+    @Test("switching profiles with a run on screen is a confirmed replacement")
+    func liveProfileConfirmation() {
+        let model = OrganizerModel(persistingSessions: false)
+        let profile = OrganizerModel.Source.liveProfile(.firefox, URL(filePath: "/tmp/places.sqlite"))
+        model.updateSource(.file(export))
+        model.updateRows([.init(id: "a", title: "A", url: "https://a.example",
+                                folder: "Development", confidence: 90, modelChoice: nil)])
+
+        model.requestProfile(profile)
+        #expect(model.pendingProfile == profile, "gated, not loaded")
+        #expect(model.source == .file(export), "nothing was read yet")
+
+        model.cancelProfile()
+        #expect(model.pendingProfile == nil)
+        #expect(model.source == .file(export))
+
+        // Asking for the library already on screen is a no-op, not a reload.
+        model.updateSource(profile)
+        model.requestProfile(profile)
+        #expect(model.pendingProfile == nil)
+    }
+
+    // MARK: Safari, the one source that can be visible and unreadable
+
+    /// A Bookmarks.plist in Safari's own nested shape, which
+    /// `.liveProfile(.safari, _)` dispatches to. `.invalid` hosts for the same
+    /// reason the other fixtures use them.
+    private func writeSafariProfile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "rookmark-safari-\(UUID().uuidString).plist")
+        let root: [String: Any] = [
+            "WebBookmarkType": "WebBookmarkTypeList",
+            "Title": "",
+            "Children": [
+                [
+                    "WebBookmarkType": "WebBookmarkTypeList",
+                    "Title": "BookmarksBar",
+                    "Children": [
+                        ["WebBookmarkType": "WebBookmarkTypeLeaf",
+                         "URLString": "https://rookmark-live-test.invalid/s1",
+                         "URIDictionary": ["title": "S1"]],
+                        ["WebBookmarkType": "WebBookmarkTypeLeaf",
+                         "URLString": "https://rookmark-live-test.invalid/s2",
+                         "URIDictionary": ["title": "S2"]],
+                    ],
+                ],
+                // Skipped wholesale, so it must not raise the count.
+                ["WebBookmarkType": "WebBookmarkTypeProxy",
+                 "Title": "History",
+                 "Children": [["WebBookmarkType": "WebBookmarkTypeLeaf",
+                               "URLString": "https://rookmark-live-test.invalid/h",
+                               "URIDictionary": ["title": "H"]]]],
+            ],
+        ]
+        try PropertyListSerialization.data(fromPropertyList: root, format: .binary, options: 0)
+            .write(to: url)
+        return url
+    }
+
+    @Test("a live Safari profile loads through the Safari importer")
+    func loadsSafariProfile() async throws {
+        let url = try writeSafariProfile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = OrganizerModel(persistingSessions: false)
+        await model.loadProfile(.liveProfile(.safari, url), discardingSession: false)
+
+        #expect(model.phase == .idle)
+        #expect(model.source == .liveProfile(.safari, url))
+        #expect(model.sourceName == "Safari profile")
+        #expect(model.allBookmarks.count == 2, "the History proxy contributes nothing")
+        #expect(model.sourceSummary?.bookmarkCount == 2)
+        #expect(model.allBookmarks.first?.originalFolderPath == ["BookmarksBar"])
+        #expect(model.sourceAccess == .allowed)
+    }
+
+    /// The welcome grid's Safari card when the file is there but Full Disk
+    /// Access is not: nothing is loaded, and the notice carries a settings link
+    /// because System Settings is exactly where this gets fixed.
+    @Test("a Safari card with no Full Disk Access reports an actionable notice")
+    func reportsFullDiskAccess() {
+        let model = OrganizerModel(persistingSessions: false)
+        #expect(model.sourceAccess == .allowed)
+
+        model.reportFullDiskAccessRequired(for: "Safari")
+
+        guard case .denied(let reason, let showsSettingsLink) = model.sourceAccess else {
+            Issue.record("expected .denied, got \(model.sourceAccess)")
+            return
+        }
+        #expect(showsSettingsLink)
+        #expect(reason.contains("Full Disk Access"))
+        // Nothing was read, and nothing was taken over: this is a notice, not
+        // a failure, so the view the user is on stays put.
+        #expect(model.source == nil && model.phase == .idle)
+
+        model.dismissSourceAccessNotice()
+        #expect(model.sourceAccess == .allowed)
+    }
+
+    /// Access revoked between the card offering Safari and the click that
+    /// loads it. The rollback is the same one every source gets, plus the
+    /// actionable notice, which a plain "import failed" banner cannot carry.
+    @Test("a Safari read refused mid-load rolls back and still offers the fix")
+    func safariPermissionDeniedDuringLoad() async throws {
+        let chromium = try writeChromiumProfile()
+        let safari = try writeSafariProfile()
+        defer {
+            try? FileManager.default.removeItem(at: chromium)
+            try? FileManager.default.removeItem(at: safari)
+        }
+
+        let model = OrganizerModel(persistingSessions: false)
+        await model.loadProfile(.liveProfile(.chrome, chromium), discardingSession: false)
+        let bookmark = try #require(model.allBookmarks.first)
+        model.updateRows([.init(id: bookmark.id, title: "A", url: bookmark.url,
+                                folder: "Development", confidence: 90, modelChoice: nil)])
+
+        // chmod 000 is the closest a test can get to a refused read; TCC
+        // itself is not reproducible in a test run.
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: safari.path(percentEncoded: false))
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: safari.path(percentEncoded: false)
+            )
+        }
+
+        await model.loadProfile(.liveProfile(.safari, safari), discardingSession: false)
+
+        #expect(model.source == .liveProfile(.chrome, chromium), "the library on screen survives")
+        #expect(model.rows.map(\.id) == [bookmark.id])
+        #expect(model.importFailureMessage != nil)
+        guard case .denied = model.sourceAccess else {
+            Issue.record("expected .denied, got \(model.sourceAccess)")
+            return
+        }
+    }
+
+    /// The regression this guards: a Chromium browser's profile refusal used
+    /// to be indistinguishable from "not installed" and fell back silently to
+    /// the export card, with no way for the user to discover Full Disk Access
+    /// was the actual fix. `isBlockedByPermissions` now asks the importer
+    /// instead of hardcoding `false` for every browser but Safari.
+    @Test("a Brave read refused mid-load reports the fix, the same as Safari does")
+    func chromiumPermissionDeniedDuringLoad() async throws {
+        let url = try writeChromiumProfile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path(percentEncoded: false))
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: url.path(percentEncoded: false)
+            )
+        }
+
+        let model = OrganizerModel(persistingSessions: false)
+        await model.loadProfile(.liveProfile(.brave, url), discardingSession: false)
+
+        #expect(model.source == nil, "nothing loaded")
+        guard case .denied(let reason, let showsSettingsLink) = model.sourceAccess else {
+            Issue.record("expected .denied, got \(model.sourceAccess)")
+            return
+        }
+        #expect(showsSettingsLink)
+        #expect(reason.contains("Brave"), "the notice names the browser that was actually refused")
+        #expect(reason.contains("Full Disk Access"))
+    }
+
+    /// A source that loads clears a notice left over from a refused one, so
+    /// the grid never keeps telling the user to grant something they don't
+    /// need any more.
+    @Test("loading a readable source clears the access notice")
+    func successfulLoadClearsTheNotice() async throws {
+        let url = try writeChromiumProfile()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = OrganizerModel(persistingSessions: false)
+        model.reportFullDiskAccessRequired(for: "Chrome")
+        await model.loadProfile(.liveProfile(.chrome, url), discardingSession: false)
+
+        #expect(model.sourceAccess == .allowed)
     }
 
     @Test("a refused import with a run on screen reports instead of taking over the view")

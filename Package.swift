@@ -64,7 +64,12 @@ let package = Package(
         ),
         .testTarget(
             name: "RookmarkKitTests",
-            dependencies: ["RookmarkKit"],
+            dependencies: [
+                "RookmarkKit",
+                // FirefoxImporterTests builds a places.sqlite fixture; the
+                // importer itself opens the file read-only.
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             path: "Tests/RookmarkKitTests"
         ),
         .testTarget(

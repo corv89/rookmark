@@ -60,6 +60,14 @@ work.
 open build/Rookmark.app
 ```
 
+If you're iterating on this repo and plan to grant Full Disk Access more than
+once, read the signing comment at the top of `scripts/make-app.sh` first: an
+ad-hoc-signed build (the default) loses that grant on every rebuild, because
+TCC ties it to the binary's exact signature rather than the app's identity.
+Setting `ROOKMARK_CODESIGN_IDENTITY` to a local code-signing certificate (free,
+one-time setup in Keychain Access — the script walks through it) makes the
+grant survive rebuilds.
+
 Or run it straight from the package during development, which skips the bundle
 and therefore shows up as `RookmarkApp` rather than `Rookmark`:
 
@@ -68,14 +76,22 @@ swift run -c release RookmarkApp
 ```
 
 On first launch (or once you clear the current library via Switch Source) you
-get a welcome screen with one card per browser actually installed on your Mac —
-[Orion](https://browser.kagi.com/) reads automatically if it's there; anything
-else (Safari, Chrome, Firefox, Brave, ...) gets a card naming exactly where that
+get a welcome screen with one card per browser actually installed on your Mac.
+[Orion](https://browser.kagi.com/), Safari, Chrome, Brave, Edge, Vivaldi and
+Firefox all read automatically — their card says "Read automatically" and loads
+the live profile in place, with no export step. All of them sit behind Full
+Disk Access, and macOS never asks for that on an app's behalf: grant it in
+System Settings ▸ Privacy & Security ▸ Full Disk Access, **then fully quit and
+relaunch Rookmark** — a running process keeps the old, denied state even after
+the grant, so the relaunch is not optional. Until you do, Rookmark says so — a
+blocked card reads "Needs Full Disk Access" and offers a button straight to
+that pane, rather than quietly demoting that browser to a manual export you
+didn't need. Any browser not in the grid gets a card naming exactly where that
 browser hides its Export Bookmarks command, which opens straight into a file
 picker. Nothing not installed is guessed at — an uninstalled browser simply
 doesn't get a card, so you're never looking at a wrong or placeholder logo.
-Dragging an export onto the window or pressing Cmd+O both still work too,
-for anything the grid doesn't cover.
+Dragging an export onto the window or pressing Cmd+O both still work too, for
+anything the grid doesn't cover.
 
 Whichever way it loads, the result is presented for review: folders with counts
 down the side, items sorted least-confident-first so your attention lands where
@@ -86,8 +102,11 @@ modified — Rookmark only ever reads the export file.
 ### Command line
 
 ```
-# Pull bookmarks straight out of an installed Orion profile
+# Pull bookmarks straight out of an installed browser profile
 swift run rookmark import-orion -o mybookmarks.html
+swift run rookmark import-chromium --browser chrome -o mybookmarks.html   # needs Full Disk Access
+swift run rookmark import-firefox -o mybookmarks.html                    # needs Full Disk Access
+swift run rookmark import-safari -o mybookmarks.html                     # needs Full Disk Access
 
 # Organize any Netscape-format bookmark export
 swift run rookmark organize mybookmarks.html \
@@ -157,10 +176,13 @@ will disagree with the ones above even with nothing else changed.
 
 ## Known limitations
 
-- Only Orion has a live importer; every other browser — including Safari,
-  which is unreadable without Full Disk Access — needs a manual HTML export.
-  The welcome screen's per-browser cards exist because of this: each one just
-  points you at that browser's Export Bookmarks command and opens the picker.
+- Every browser on the grid reads live, but only once you grant Full Disk
+  Access by hand — macOS has no prompt for it, so no app can ask on your
+  behalf — and only after you fully quit and relaunch Rookmark; a grant made
+  while it's still running does not apply until the next launch. Any browser
+  the grid doesn't know about still needs a manual HTML export. The welcome
+  screen's export cards exist because of this: each one points you at that
+  browser's Export Bookmarks command and opens the picker.
 - The taxonomy is flat. Rookmark won't create nested folder structures.
 
 ## Contributing

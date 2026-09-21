@@ -58,12 +58,80 @@ final class OrganizerModel {
         var id: String { rawValue }
     }
 
+    /// A browser whose profile Rookmark reads in place, with no export step.
+    /// Orion keeps its own `Source` case — it was the first and its name is
+    /// wired through the session and the export stem — while these six share
+    /// one, because all that distinguishes them is which importer runs.
+    enum LiveBrowser: String, Equatable, Sendable, CaseIterable {
+        case chrome, brave, edge, vivaldi, firefox, safari
+
+        var name: String {
+            switch self {
+            case .chrome: "Chrome"
+            case .brave: "Brave"
+            case .edge: "Edge"
+            case .vivaldi: "Vivaldi"
+            case .firefox: "Firefox"
+            case .safari: "Safari"
+            }
+        }
+
+        /// The live bookmarks file, or nil when this Mac has no readable
+        /// profile for that browser.
+        func profileURL() -> URL? {
+            switch self {
+            case .chrome: ChromiumImporter.defaultBookmarksURL(for: .chrome)
+            case .brave: ChromiumImporter.defaultBookmarksURL(for: .brave)
+            case .edge: ChromiumImporter.defaultBookmarksURL(for: .edge)
+            case .vivaldi: ChromiumImporter.defaultBookmarksURL(for: .vivaldi)
+            case .firefox: FirefoxImporter.defaultPlacesURL()
+            case .safari: SafariImporter.defaultBookmarksURL()
+            }
+        }
+
+        /// Whether the profile is on this Mac but Rookmark isn't allowed to
+        /// read it. All six live browsers sit behind the same Full Disk
+        /// Access wall — macOS never prompts for it on an app's behalf — so a
+        /// refusal here is something the user can fix, not a sign the browser
+        /// isn't installed.
+        var isBlockedByPermissions: Bool {
+            switch self {
+            case .chrome: ChromiumImporter.isBlockedByFullDiskAccess(for: .chrome)
+            case .brave: ChromiumImporter.isBlockedByFullDiskAccess(for: .brave)
+            case .edge: ChromiumImporter.isBlockedByFullDiskAccess(for: .edge)
+            case .vivaldi: ChromiumImporter.isBlockedByFullDiskAccess(for: .vivaldi)
+            case .firefox: FirefoxImporter.isBlockedByFullDiskAccess()
+            case .safari: SafariImporter.isBlockedByFullDiskAccess()
+            }
+        }
+
+        /// Read-only, like every other source: the file is parsed where it sits
+        /// and the browser's own copy is never written to.
+        func importBookmarks(at url: URL) throws -> ParseResult {
+            switch self {
+            case .chrome: try ChromiumImporter.importBookmarks(at: url, for: .chrome).parse
+            case .brave: try ChromiumImporter.importBookmarks(at: url, for: .brave).parse
+            case .edge: try ChromiumImporter.importBookmarks(at: url, for: .edge).parse
+            case .vivaldi: try ChromiumImporter.importBookmarks(at: url, for: .vivaldi).parse
+            case .firefox:
+                try FirefoxImporter.importBookmarks(at: url).parse
+            case .safari:
+                try SafariImporter.importBookmarks(at: url).parse
+            }
+        }
+    }
+
     /// Where the bookmarks under review came from. Launch reads the installed
-    /// Orion profile; a user-initiated import reads any Netscape-format export.
-    /// The pipeline downstream of this (parse -> taxonomy -> classify -> export)
-    /// is identical for both, because ids are derived from the normalized URL.
+    /// Orion profile; a user-initiated import reads either another browser's
+    /// live profile or any Netscape-format export. The pipeline downstream of
+    /// this (parse -> taxonomy -> classify -> export) is identical for all
+    /// three, because ids are derived from the normalized URL.
     enum Source: Equatable {
         case orionProfile
+        /// The file is resolved when the source is picked, not when it loads:
+        /// the card and the toolbar both need to know a profile is there before
+        /// they offer it at all.
+        case liveProfile(LiveBrowser, URL)
         case file(URL)
 
         /// What the sidebar calls it. Requirement: the user can always tell which
@@ -71,6 +139,7 @@ final class OrganizerModel {
         var name: String {
             switch self {
             case .orionProfile: "Orion profile"
+            case .liveProfile(let browser, _): "\(browser.name) profile"
             case .file(let url): url.lastPathComponent
             }
         }
@@ -100,8 +169,28 @@ final class OrganizerModel {
         }
     }
 
+    /// Whether the source the user just picked could be read at all.
+    ///
+    /// `.denied` deliberately carries the same pair `ModelAvailability`'s
+    /// `.unavailable` does — the notice text, and whether System Settings is
+    /// where the user acts on it — because it is the same kind of state: not a
+    /// failure to report and forget, but a condition they can lift right now.
+    /// Every live browser can produce it: all six sit behind Full Disk
+    /// Access, which macOS never prompts for on an app's behalf, so falling
+    /// back to "export the file yourself" would hide a fix the user is one
+    /// pane away from.
+    enum SourceAccess: Equatable {
+        case allowed
+        case denied(reason: String, showsSettingsLink: Bool)
+    }
+
+    static func fullDiskAccessReason(for browserName: String) -> String {
+        "\(browserName) keeps its bookmarks behind Full Disk Access, and macOS never asks for it on an app's behalf. Add Rookmark under Privacy & Security ▸ Full Disk Access, then pick \(browserName) again."
+    }
+
     // Profile
     private(set) var source: Source?
+    private(set) var sourceAccess: SourceAccess = .allowed
     private(set) var allBookmarks: [Bookmark] = []
     /// Counts the sidebar shows about whatever source is loaded. Nil until one is.
     /// Orion reports its own file's irregularities; a generic export has none to
@@ -138,10 +227,10 @@ final class OrganizerModel {
     /// taking over the whole detail view (`.failed` is reserved for failures with
     /// nothing to protect). Cleared by `dismissImportFailure()`.
     private(set) var importFailureMessage: String?
-    /// An Orion switch waiting on the replace confirmation, mirroring
-    /// `pendingImport` for the profile path. Non-nil drives the dialog; the load
-    /// has not started.
-    private(set) var pendingOrionProfile = false
+    /// A browser-profile switch waiting on the replace confirmation, mirroring
+    /// `pendingImport` for the profile paths. Non-nil drives the dialog; the
+    /// load has not started.
+    private(set) var pendingProfile: Source?
     /// A "start fresh" waiting on the same confirmation the two import paths
     /// use. True drives the dialog; nothing has been cleared yet.
     private(set) var pendingStartFresh = false
@@ -258,6 +347,7 @@ final class OrganizerModel {
     private var exportStem: String {
         switch source {
         case .orionProfile, nil: "orion"
+        case .liveProfile(let browser, _): browser.rawValue
         case .file(let url): url.deletingPathExtension().lastPathComponent
         }
     }
@@ -325,28 +415,37 @@ final class OrganizerModel {
 
     func dismissImportFailure() { importFailureMessage = nil }
 
-    /// The toolbar's way back to the Orion library, so leaving an imported file
-    /// never needs a relaunch. Guards mirror requestImport(from:): nothing during
-    /// a run, and a run on screen is replaced only after confirmation.
-    func requestOrionProfile() {
-        guard !isBusy else { return }
-        guard case .orionProfile = source else {
-            if rows.isEmpty {
-                Task { await load(.orionProfile, discardingSession: false) }
-            } else {
-                pendingOrionProfile = true
-            }
-            return
+    /// The way into a browser profile from the welcome grid or the toolbar, so
+    /// leaving an imported file never needs a relaunch. Guards mirror
+    /// requestImport(from:): nothing during a run, a request for the library
+    /// already on screen is a no-op, and a run on screen is replaced only after
+    /// confirmation.
+    func requestProfile(_ newSource: Source) {
+        guard !isBusy, source != newSource else { return }
+        if rows.isEmpty {
+            Task { await loadProfile(newSource, discardingSession: false) }
+        } else {
+            pendingProfile = newSource
         }
     }
 
-    func confirmOrionProfile() {
-        guard pendingOrionProfile else { return }
-        pendingOrionProfile = false
-        Task { await load(.orionProfile, discardingSession: true) }
+    func confirmProfile() {
+        guard let newSource = pendingProfile else { return }
+        pendingProfile = nil
+        Task { await loadProfile(newSource, discardingSession: true) }
     }
 
-    func cancelOrionProfile() { pendingOrionProfile = false }
+    func cancelProfile() { pendingProfile = nil }
+
+    /// The welcome grid's card for a browser whose profile is there but
+    /// unreadable. There is nothing to load and nothing to roll back, so the
+    /// click reports the condition instead of attempting a read that can only
+    /// fail.
+    func reportFullDiskAccessRequired(for browserName: String) {
+        sourceAccess = .denied(reason: Self.fullDiskAccessReason(for: browserName), showsSettingsLink: true)
+    }
+
+    func dismissSourceAccessNotice() { sourceAccess = .allowed }
 
     // State-update halves split out so tests can drive the import gate without a
     // real load: drag-and-drop and NSOpenPanel cannot run in CI, and neither can
@@ -380,6 +479,23 @@ final class OrganizerModel {
         await load(.file(url), discardingSession: discardingSession)
     }
 
+    /// The async half of `requestProfile(_:)`, in the same shape as
+    /// `importFile(at:discardingSession:)` — which is also what lets a test
+    /// drive a profile load without the confirmation dialog in the way.
+    func loadProfile(_ newSource: Source, discardingSession: Bool) async {
+        await load(newSource, discardingSession: discardingSession)
+    }
+
+    /// Whether a load failed because macOS refused the read rather than
+    /// because the browser isn't there — the one condition `load()`'s catch
+    /// reports as a fixable notice instead of a plain failure banner.
+    private func isFullDiskAccessDenial(_ error: Swift.Error) -> Bool {
+        if let error = error as? SafariImporter.Error, case .permissionDenied = error { return true }
+        if let error = error as? ChromiumImporter.Error, case .permissionDenied = error { return true }
+        if let error = error as? FirefoxImporter.Error, case .permissionDenied = error { return true }
+        return false
+    }
+
     private func load(_ newSource: Source, discardingSession: Bool) async {
         refreshModelAvailability()
         // Rollback snapshot: if the new source cannot be read, the model returns to
@@ -408,6 +524,7 @@ final class OrganizerModel {
         search = ""                       // stale review filters belong to the old run
         sort = .leastConfident
         importFailureMessage = nil        // a retry that succeeds clears the banner
+        sourceAccess = .allowed           // and so does picking a source that loads
         wasCancelled = false
         lastRunSeconds = nil
         phase = .scanning
@@ -431,6 +548,14 @@ final class OrganizerModel {
                     bookmarkCount: imported.summary.bookmarkCount,
                     orphanedFolderReferences: imported.summary.orphanedFolderReferences
                 )
+            case .liveProfile(let browser, let url):
+                // No orphan concept here: both formats are real trees, so a
+                // bookmark's folder is wherever it sits.
+                let parse = try await Task.detached(priority: .userInitiated) {
+                    try browser.importBookmarks(at: url)
+                }.value
+                allBookmarks = parse.bookmarks
+                sourceSummary = SourceSummary(bookmarkCount: parse.bookmarks.count)
             case .file(let url):
                 // Parse only, exactly like the CLI: read the bytes, never write to
                 // the file, never fetch anything a bookmark points at. The isFileURL
@@ -480,6 +605,11 @@ final class OrganizerModel {
             search = previous.search
             sort = previous.sort
             workingFolders = previous.workingFolders
+            // Access revoked between the card offering this browser and this
+            // load. The rollback above still stands; this only adds the way out.
+            if isFullDiskAccessDenial(error), case .liveProfile(let browser, _) = newSource {
+                reportFullDiskAccessRequired(for: browser.name)
+            }
             let message = String(describing: error)
             if rows.isEmpty {
                 // Nothing on screen to protect: the failure is the whole story and
